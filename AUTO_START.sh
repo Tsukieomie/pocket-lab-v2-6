@@ -123,9 +123,9 @@ log "[2/4] Pre-signing approval in background..."
   NEW_PUB_SHA=$(openssl pkey -pubin -in "$PRESIGN_PUB" -outform DER \
     | openssl dgst -sha256 -r | awk '{print $1}')
   APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  # Expiry: 60 min window (generous — Perplexity will re-nonce if needed)
-  # EXPIRES_AT is set loosely; gate script validates nonce freshness separately
-  EXPIRES_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)  # placeholder; updated at open time
+  # Expiry: APPROVED_AT + 5 minutes. Computed via python3 so it is portable
+  # across BusyBox date (iSH), GNU date, and BSD date.
+  EXPIRES_AT=$(python3 -c "from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) + timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
   RUN_ID="auto-presign-$(date +%s)"
   PDF_SHA="38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134"
 

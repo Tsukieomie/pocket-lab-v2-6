@@ -77,7 +77,9 @@ NONCE_SHA=$(printf '%s' "$NONCE" | openssl dgst -sha256 -r | awk '{print $1}')
 echo "   Nonce: $NONCE"
 
 APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-EXPIRES_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)  # gate checks nonce freshness
+# Expiry: APPROVED_AT + 5 minutes. Computed via python3 for portability
+# (BusyBox date on iSH does not support `-d '+5 minutes'`).
+EXPIRES_AT=$(python3 -c "from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) + timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
 RUN_ID="perplexity-v27-$(date +%s)"
 
 python3 -c "
