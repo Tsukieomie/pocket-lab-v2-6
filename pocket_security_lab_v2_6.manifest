@@ -1,67 +1,13 @@
 {
-  "name": "Pocket Security Lab",
-  "version": "2.7",
-  "created_utc": "2026-04-20T04:55:00Z",
-  "changelog": [
-    "v2.7: Debian Bullseye i386 chroot installed at /mnt/debian via Perplexity Computer",
-    "v2.7: gcc 10.2.1 and curl 7.74.0 verified working inside chroot",
-    "v2.7: Entry script at /root/debian.sh — prompt: debian#",
-    "v2.7: Updated start-lab.sh hash in manifest (auto-port-finding + watchdog)",
-    "v2.7: Tamper manifest re-signed to match current start-lab.sh",
-    "v2.7: debian-ish-rootfs GitHub release published (v1 + v2 tarballs)",
-    "v2.6: Perplexity Computer live SSH connection via bore.pub tunnel",
-    "v2.6: Fixed verify_pocket_lab_v2_4.sh to use correct signing key",
-    "v2.6: Added OPEN_POCKET_LAB_V2_6.sh with dual-gate approval",
-    "v2.6: Added STATUS_V2_6.sh unified status report",
-    "v2.6: Added verify_pocket_lab_v2_6.sh full chain verifier"
-  ],
+  "name": "pocket_security_lab_v2_6",
+  "version": "2.6",
   "policy": {
-    "pdf_self_execution": false,
     "fail_closed": true,
+    "pdf_self_execution": false,
     "trust_on_first_use": false,
     "skip_flags_allowed": false,
     "private_keys_in_bundle": false,
     "hash_prefix_match_allowed": false,
-    "proceed_anyway_allowed": false,
-    "perplexity_ssh_access": true,
-    "github_approval_required": true,
-    "signed_approval_required": true
-  },
-  "signing": {
-    "algorithm": "ECDSA-secp256k1-SHA256",
-    "ish_startup_signing_pubkey_sha256": "ad8a5bf4990f1479ad81dca12730ec690ff6a0483c0aca9e08112beced0b7ff3",
-    "github_approval_pubkey_sha256": "84758a2db2bd28f4ca900de4a2ec2eddea024287ba26dea31ea328980d9da6ab"
-  },
-  "tunnel": {
-    "type": "bore",
-    "host": "bore.pub",
-    "public_port": 40188,
-    "local_ssh_port": 2222,
-    "start_script": "/root/start-lab.sh"
-  },
-  "debian_chroot": {
-    "path": "/mnt/debian",
-    "distro": "Debian Bullseye",
-    "arch": "i386",
-    "size_mb": 294,
-    "entry": "/root/debian.sh",
-    "working_tools": ["gcc 10.2.1", "curl 7.74.0"],
-    "source_repo": "https://github.com/Tsukieomie/debian-ish-rootfs",
-    "installed_by": "Perplexity Computer"
-  },
-  "start_lab_sha256": "d10364e9deb105bedf0b9e9d73ff7c03cd5716d761374d9265b6ec65e61c1aa7",
-  "artifacts": [
-    {
-      "path": "pocket_security_lab_v2_4_integrated.pdf",
-      "role": "inert trigger and reference",
-      "sha256": "38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134",
-      "sha256d": "7db0b26e9e4897b97284ccc16d3426cdbf3fa4435eaf80f261d3768e5d4f439d"
-    },
-    {
-      "path": "pocket_security_lab_v2_4.tar.enc",
-      "role": "encrypted lab archive",
-      "sha256": "3201076f28cd6a6978586e18ce23c2c9851a73a0c6d357382fc44361758b9493",
-      "sha256d": "2e8026c6bb6415faf0acf7a2403b112231609413af87125a0b0ea8ae5e3f4227"
-    }
-  ]
+    "proceed_anyway_allowed": false
+  }
 }
