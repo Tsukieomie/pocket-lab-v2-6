@@ -155,3 +155,64 @@ Install via: `gem install base64` or download `ruby-base64-0.2.0-r1.apk` from Al
 | musl loader | 1.2.2 (host) | 1.2.6 (edge, in musl tree) |
 | RubyGems | 3.1.6 | 3.6.9 |
 | Bundler | 2.2.20 | 2.6.9 |
+
+## Homebrew Installation (v2.9 — In Progress)
+
+### Status
+Homebrew is cloned and `brew --version` responds. Two active blockers being resolved:
+1. `/dev/fd/63` — bash process substitution fails (iSH lacks `/proc/self/fd` inside chroot)
+2. `HOMEBREW_GIT_PATH` — brew uses Debian git (`/usr/bin/git`, SIGSYS), needs Alpine git wrapper
+3. Root check in `brew.sh` — needs patch or non-root user
+
+### What's installed
+- Homebrew cloned to `/home/linuxbrew/.linuxbrew/Homebrew/` via Alpine git
+- `brew` symlink at `/home/linuxbrew/.linuxbrew/bin/brew`
+- All prefix dirs created: `Cellar`, `bin`, `etc`, `include`, `lib`, `sbin`, `share`, `var`, `opt`
+
+### Install method
+```sh
+# Step 1: Clone Homebrew using Alpine git (from iSH host, outside chroot)
+HOME=/mnt/debian/root \
+GIT_CONFIG_GLOBAL=/mnt/debian/root/.gitconfig \
+git clone --depth=1 https://github.com/Homebrew/brew.git \
+  /mnt/debian/home/linuxbrew/.linuxbrew/Homebrew
+
+# Step 2: Create brew symlink
+ln -sf ../Homebrew/bin/brew /mnt/debian/home/linuxbrew/.linuxbrew/bin/brew
+
+# Step 3: Enter chroot and run brew
+chroot /mnt/debian /bin/bash -c "
+  export PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+  export HOME=/root
+  export HOMEBREW_NO_ANALYTICS=1
+  export HOMEBREW_NO_ENV_HINTS=1
+  export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
+  export HOMEBREW_GIT_PATH=/usr/local/bin/git   # Alpine musl git wrapper
+  brew --version
+"
+```
+
+### Patches applied to install.sh
+- `UNAME_MACHINE` forced to `x86_64` (Homebrew rejects i686)
+- Architecture abort replaced with warning
+- Root abort replaced with warning
+- Process substitution `< <(...)` replaced with `<<< "$(...)"` (bash herestring)
+
+### Next steps
+- Patch `brew.sh` process substitution at line 754 (git version check)
+- Patch `brew.sh` root check at line 256
+- Set `HOMEBREW_GIT_PATH=/usr/local/bin/git` (our Alpine musl git wrapper)
+- Add `/usr/local/bin` to brew's `PATH` so it finds the musl wrappers
+- Test `brew install hello` (simplest formula, builds from source)
+
+### Key env vars for brew inside chroot
+```sh
+export HOMEBREW_NO_ANALYTICS=1
+export HOMEBREW_NO_ENV_HINTS=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
+export HOMEBREW_CELLAR=/home/linuxbrew/.linuxbrew/Cellar
+export HOMEBREW_REPOSITORY=/home/linuxbrew/.linuxbrew/Homebrew
+export HOMEBREW_GIT_PATH=/usr/local/bin/git
+export HOMEBREW_RUBY_PATH=/usr/local/bin/ruby
+```
