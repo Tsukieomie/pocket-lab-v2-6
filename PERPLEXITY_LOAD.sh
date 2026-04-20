@@ -139,6 +139,11 @@ echo "[4/5] Pushing to repo + updating device (parallel)..."
 GIT_PID=$!
 
 # Foreground: update device (no git dependency)
+# The manifest update is done via a proper python3 script (args over sys.argv,
+# write-temp-then-rename) rather than an embedded one-liner. This avoids the
+# single-quote-sensitive heredoc and guarantees the manifest is replaced
+# atomically (os.replace is atomic within a filesystem) — a crash in the
+# middle of the rewrite previously corrupted the manifest that gates unlock.
 NEW_PUB_CONTENT=$(cat "$PRESIGN_PUB")
 ssh_run "
 set -e
@@ -151,17 +156,32 @@ KEY=\$SEC/ish_startup_signing_secp256k1.key
 MANIFEST=\$SEC/startup-integrity.manifest
 SIG=\$SEC/startup-integrity.manifest.sig
 
+# Write the manifest-updater once; invoke it per target with sys.argv.
+UPDATER=/tmp/pocket_lab_manifest_update.py
+cat > \"\$UPDATER\" << 'PYEOF'
+import os, sys
+manifest, path, new_sha, new_sha256d = sys.argv[1:5]
+with open(manifest) as f:
+    lines = f.readlines()
+tmp = manifest + '.tmp'
+with open(tmp, 'w') as f:
+    for line in lines:
+        if line.startswith(path + '|'):
+            f.write(path + '|' + new_sha + '|' + new_sha256d + '\n')
+        else:
+            f.write(line)
+os.replace(tmp, manifest)
+PYEOF
+
 for TARGET in \
   \$SEC/pocket_lab_github_approval_secp256k1.pub \
   \$SEC/pocket-lab-signed-approval.sh; do
   NEW_SHA=\$(sha256sum \"\$TARGET\" | awk '{print \$1}')
   NEW_SHA256D=\$(openssl dgst -sha256 -binary \"\$TARGET\" | openssl dgst -sha256 -r | awk '{print \$1}')
-  python3 -c \"
-path='\$TARGET'; ns='\$NEW_SHA'; nd='\$NEW_SHA256D'
-lines=open('\$MANIFEST').readlines()
-open('\$MANIFEST','w').writelines([path+'|'+ns+'|'+nd+'\n' if l.startswith(path+'|') else l for l in lines])
-\"
+  python3 \"\$UPDATER\" \"\$MANIFEST\" \"\$TARGET\" \"\$NEW_SHA\" \"\$NEW_SHA256D\"
 done
+rm -f \"\$UPDATER\"
+
 openssl dgst -sha256 -sign \"\$KEY\" -out \"\$SIG\" \"\$MANIFEST\"
 \$SEC/startup-verify.sh
 . /root/.pocket_lab_secure/signed-approval-config
