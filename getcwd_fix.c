@@ -1,63 +1,62 @@
 /*
- * getcwd_fix.c — LD_PRELOAD shim for iSH chroot getcwd() path correction
- * Pocket Security Lab v2.8
- *
- * Problem:
- *   iSH 4.20.69 chroot is not a true namespace-isolated chroot.
- *   The getcwd() syscall returns the HOST path (e.g. /mnt/debian/tmp/myrepo)
- *   instead of the chroot-relative path (/tmp/myrepo).
- *   Alpine git reads this path for safe.directory and worktree validation,
- *   then tries to stat() it from inside the chroot — where it resolves to
- *   /mnt/debian/mnt/debian/tmp/myrepo (nonexistent) → fatal error.
- *
- * Fix:
- *   Override getcwd() to strip the /mnt/debian prefix before returning.
- *   Compiled with Alpine gcc (musl) so it works inside the musl chroot context.
- *
- * Build (on Alpine/iSH host):
- *   gcc -shared -fPIC -nostartfiles -o libgetcwd_fix.so getcwd_fix.c
- *   cp libgetcwd_fix.so /mnt/debian/usr/local/musl/lib/
- *
- * Usage (in wrapper scripts):
- *   export LD_PRELOAD=/usr/local/musl/lib/libgetcwd_fix.so
+ * getcwd_fix_nodeps.c - zero-dependency LD_PRELOAD getcwd shim
+ * Works with both musl AND glibc programs (no libc linkage).
  */
-
 #define _GNU_SOURCE
-#include <stddef.h>
-#include <string.h>
+
+/* memmove - implement inline to avoid libc dep */
+static void *my_memmove(void *dst, const void *src, unsigned long n) {
+    char *d = (char *)dst;
+    const char *s = (const char *)src;
+    if (d < s) {
+        while (n--) *d++ = *s++;
+    } else {
+        d += n; s += n;
+        while (n--) *--d = *--s;
+    }
+    return dst;
+}
+
+static unsigned long my_strlen(const char *s) {
+    const char *p = s;
+    while (*p) p++;
+    return p - s;
+}
+
+static int my_strncmp(const char *a, const char *b, unsigned long n) {
+    while (n-- && *a && (*a == *b)) { a++; b++; }
+    return n == (unsigned long)-1 ? 0 : (unsigned char)*a - (unsigned char)*b;
+}
 
 #define CHROOT_PREFIX "/mnt/debian"
 #define PREFIX_LEN    11
 
-char *getcwd(char *buf, size_t size) {
-    long ret = 0;
-
-    /* Direct syscall 183 (getcwd, x86 32-bit) to avoid infinite recursion */
+/* Override getcwd for BOTH musl and glibc programs */
+char *getcwd(char *buf, unsigned long size) {
+    long ret;
     __asm__ volatile (
-        "mov $183, %%eax\n"
-        "mov %1, %%ebx\n"
-        "mov %2, %%ecx\n"
-        "int $0x80\n"
-        "mov %%eax, %0\n"
+        "mov $183, %%eax\n\t"
+        "mov %1, %%ebx\n\t"
+        "mov %2, %%ecx\n\t"
+        "int $0x80\n\t"
+        "mov %%eax, %0"
         : "=r"(ret)
         : "r"(buf), "r"(size)
-        : "eax", "ebx", "ecx"
+        : "eax", "ebx", "ecx", "memory"
     );
-
     if (ret < 0) return (char *)0;
 
-    /* Strip /mnt/debian prefix if present */
-    if (buf && strncmp(buf, CHROOT_PREFIX, PREFIX_LEN) == 0) {
-        size_t full_len = strlen(buf);
-        size_t remaining = full_len - PREFIX_LEN;
-
+    if (buf && my_strncmp(buf, CHROOT_PREFIX, PREFIX_LEN) == 0) {
+        unsigned long full_len = my_strlen(buf);
+        unsigned long remaining = full_len - PREFIX_LEN;
         if (remaining == 0) {
-            buf[0] = '/';
-            buf[1] = '\0';
+            buf[0] = '/'; buf[1] = '\0';
         } else if (buf[PREFIX_LEN] == '/') {
-            memmove(buf, buf + PREFIX_LEN, remaining + 1);
+            my_memmove(buf, buf + PREFIX_LEN, remaining + 1);
         }
     }
-
     return buf;
 }
+
+/* Also override __getcwd used internally by some glibc versions */
+char *__getcwd(char *buf, unsigned long size) __attribute__((alias("getcwd")));
