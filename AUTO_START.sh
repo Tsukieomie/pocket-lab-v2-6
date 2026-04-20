@@ -105,12 +105,12 @@ else
   fi
 fi
 
-if pgrep sshd >/dev/null 2>&1; then
+if pgrep -f "usr.sbin.sshd" >/dev/null 2>&1; then
   SSHD_STATUS="UP"
   log "SSHD: already RUNNING — skip"
 else
   /usr/sbin/sshd 2>/dev/null || true
-  pgrep sshd >/dev/null 2>&1 && SSHD_STATUS="UP"
+  pgrep -f "usr.sbin.sshd" >/dev/null 2>&1 && SSHD_STATUS="UP"
   log "SSHD: $SSHD_STATUS"
 fi
 
@@ -191,7 +191,7 @@ DEBIAN="NOT MOUNTED"
 [ -f /mnt/debian/bin/sh ] && DEBIAN="MOUNTED (/mnt/debian)"
 echo " Debian:      $DEBIAN"
 
-echo " Tunnel:      bore.pub:40188 [$TUNNEL_STATUS]"
+BORE_PORT=$(cat /tmp/bore_port.txt 2>/dev/null || echo "40188"); echo " Tunnel:      bore.pub:$BORE_PORT [$TUNNEL_STATUS]"
 echo " SSHD:        [$SSHD_STATUS]"
 echo " Pre-signed:  [$PRESIGN_READY] → /tmp/presign_approval.*"
 echo "══════════════════════════════════════════════════════"
@@ -202,7 +202,7 @@ echo " (Pre-signed key is ready — open will be faster)"
 echo "══════════════════════════════════════════════════════"
 
 # Save boot event (delta-only)
-BOOT_MSG="AUTO_START v2.7 ran at $(date -u +%Y-%m-%dT%H:%M:%SZ). Tunnel:$TUNNEL_STATUS SSHD:$SSHD_STATUS Debian:$DEBIAN Vault:$VAULT_STATUS PreSign:$PRESIGN_READY"
+BORE_PORT=$(cat /tmp/bore_port.txt 2>/dev/null || echo "?"); BOOT_MSG="AUTO_START v2.7 ran at $(date -u +%Y-%m-%dT%H:%M:%SZ). Tunnel:$TUNNEL_STATUS Port:$BORE_PORT SSHD:$SSHD_STATUS Debian:$DEBIAN Vault:$VAULT_STATUS PreSign:$PRESIGN_READY"
 mem0_save "$BOOT_MSG"
 
 log "=== AUTO_START v2.7 complete ==="
