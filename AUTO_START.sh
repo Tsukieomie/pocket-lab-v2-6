@@ -115,21 +115,27 @@ else
 fi
 
 # ── STEP 2: Pre-sign approval (background, parallel) ───────
-log "[2/4] Pre-signing approval in background..."
-(
-  # Generate keypair
-  openssl ecparam -name "$APPROVAL_CURVE" -genkey -noout -out "$PRESIGN_KEY" 2>/dev/null
-  openssl ec -in "$PRESIGN_KEY" -pubout -out "$PRESIGN_PUB" 2>/dev/null
-  NEW_PUB_SHA=$(openssl pkey -pubin -in "$PRESIGN_PUB" -outform DER \
-    | openssl dgst -sha256 -r | awk '{print $1}')
-  APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  # Expiry: 60 min window (generous — Perplexity will re-nonce if needed)
-  # EXPIRES_AT is set loosely; gate script validates nonce freshness separately
-  EXPIRES_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)  # placeholder; updated at open time
-  RUN_ID="auto-presign-$(date +%s)"
-  PDF_SHA="38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134"
+# Device-local self-signing is a RECOVERY PATH ONLY. When enabled, a fresh
+# keypair is generated on the device and used to sign approvals — which
+# collapses Gate 2 to "the device vouches for itself". Off by default;
+# set POCKET_LAB_SELF_SIGN=1 to opt in. See SECURITY.md.
+PRESIGN_PID=""
+if [ "${POCKET_LAB_SELF_SIGN:-0}" = "1" ]; then
+  log "[2/4] Pre-signing approval in background (POCKET_LAB_SELF_SIGN=1)..."
+  (
+    # Generate keypair
+    openssl ecparam -name "$APPROVAL_CURVE" -genkey -noout -out "$PRESIGN_KEY" 2>/dev/null
+    openssl ec -in "$PRESIGN_KEY" -pubout -out "$PRESIGN_PUB" 2>/dev/null
+    NEW_PUB_SHA=$(openssl pkey -pubin -in "$PRESIGN_PUB" -outform DER \
+      | openssl dgst -sha256 -r | awk '{print $1}')
+    APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    # Expiry: APPROVED_AT + 5 minutes. Computed via python3 so it is portable
+    # across BusyBox date (iSH), GNU date, and BSD date.
+    EXPIRES_AT=$(python3 -c "from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) + timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+    RUN_ID="auto-presign-$(date +%s)"
+    PDF_SHA="38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134"
 
-  python3 -c "
+    python3 -c "
 import json
 a = {
   'approval_pubkey_sha256': '$NEW_PUB_SHA',
@@ -146,11 +152,14 @@ a = {
 }
 open('$PRESIGN_JSON','w').write(json.dumps(a,sort_keys=True,separators=(',',':'))+'\n')
 "
-  openssl dgst -sha256 -sign "$PRESIGN_KEY" -out "$PRESIGN_SIG" "$PRESIGN_JSON"
-  echo "$NEW_PUB_SHA" > /tmp/presign_pub_sha.txt
-  log "Pre-sign complete: $NEW_PUB_SHA"
-) &
-PRESIGN_PID=$!
+    openssl dgst -sha256 -sign "$PRESIGN_KEY" -out "$PRESIGN_SIG" "$PRESIGN_JSON"
+    echo "$NEW_PUB_SHA" > /tmp/presign_pub_sha.txt
+    log "Pre-sign complete: $NEW_PUB_SHA"
+  ) &
+  PRESIGN_PID=$!
+else
+  log "[2/4] Pre-sign skipped (POCKET_LAB_SELF_SIGN not set; recovery-only path)."
+fi
 
 # ── STEP 3: mem0 Context Load (while pre-sign runs) ────────
 log "[3/4] Loading mem0 context (single fetch)..."
@@ -167,9 +176,11 @@ else
 fi
 
 # Wait for pre-sign to finish (should be done by now)
-wait $PRESIGN_PID 2>/dev/null || true
 PRESIGN_READY="NO"
-[ -f "$PRESIGN_SIG" ] && PRESIGN_READY="YES"
+if [ -n "$PRESIGN_PID" ]; then
+  wait "$PRESIGN_PID" 2>/dev/null || true
+  [ -f "$PRESIGN_SIG" ] && PRESIGN_READY="YES"
+fi
 log "Pre-signed approval ready: $PRESIGN_READY"
 
 # ── STEP 4: Lab Status ─────────────────────────────────────

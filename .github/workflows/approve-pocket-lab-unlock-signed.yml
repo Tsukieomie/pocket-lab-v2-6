@@ -10,6 +10,9 @@ on:
         description: 'Nonce (from iSH nonce output)'
         required: true
 
+permissions:
+  contents: write
+
 jobs:
   approve:
     runs-on: ubuntu-latest
@@ -26,7 +29,26 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           SIGNING_KEY: ${{ secrets.POCKET_LAB_APPROVAL_SIGNING_KEY }}
         run: |
-          NONCE_SHA256=$(echo -n "$NONCE" | sha256sum | awk '{print $1}')
+          set -eu
+          # Write the signing key with a restrictive umask into a mktemp path,
+          # and guarantee cleanup even on failure via an EXIT trap.
+          umask 077
+          KEYFILE=$(mktemp /tmp/signing.XXXXXXXX.key)
+          PUBFILE=$(mktemp /tmp/signing.XXXXXXXX.pub)
+          trap 'rm -f "$KEYFILE" "$PUBFILE"' EXIT
+
+          echo "$SIGNING_KEY" | base64 -d > "$KEYFILE"
+
+          # Derive the public key from the private key in the same secret,
+          # then compute its SHA-256 over the DER-encoded SPKI. This way the
+          # approval JSON's approval_pubkey_sha256 always matches the key we
+          # just signed with — rotating the secret can't leave a stale sha
+          # embedded in the JSON.
+          openssl pkey -in "$KEYFILE" -pubout -out "$PUBFILE"
+          PUBKEY_SHA256=$(openssl pkey -pubin -in "$PUBFILE" -outform DER \
+            | sha256sum | awk '{print $1}')
+
+          NONCE_SHA256=$(printf '%s' "$NONCE" | sha256sum | awk '{print $1}')
           APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EXPIRES_AT=$(date -u -d '+5 minutes' +%Y-%m-%dT%H:%M:%SZ)
 
@@ -42,17 +64,21 @@ jobs:
             "expires_at_utc": "$EXPIRES_AT",
             "repo": "${{ github.repository }}",
             "run_id": "$RUN_ID",
-            "approval_pubkey_sha256": "84758a2db2bd28f4ca900de4a2ec2eddea024287ba26dea31ea328980d9da6ab"
+            "approval_pubkey_sha256": "$PUBKEY_SHA256"
           }
           JSON
 
-          echo "$SIGNING_KEY" | base64 -d > /tmp/signing.key
-          openssl dgst -sha256 -sign /tmp/signing.key \
+          openssl dgst -sha256 -sign "$KEYFILE" \
             -out approvals/current.json.sig approvals/current.json
-          rm -f /tmp/signing.key
+
+          # Post-sign self-verify: fail hard if openssl cannot verify the
+          # signature we just produced against the derived public key.
+          openssl dgst -sha256 -verify "$PUBFILE" \
+            -signature approvals/current.json.sig approvals/current.json
 
           git config user.name "Pocket Lab Bot"
           git config user.email "bot@pocket-lab"
           git add approvals/
           git commit -m "Signed approval for run $RUN_ID by $APPROVED_BY"
           git push
+

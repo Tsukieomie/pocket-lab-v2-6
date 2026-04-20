@@ -1,0 +1,7 @@
+/tmp/
+*.tmp
+*.key
+*.pem
+/.bore_env
+/approvals/current.json.sig.tmp
+*.log

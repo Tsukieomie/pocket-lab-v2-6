@@ -10,6 +10,11 @@
 # ============================================================
 set -eu
 
+# Pinned SHA-256 for the bore v0.6.0 i686 musl release asset. Verified
+# upstream on 2026-04-20 via `curl -sL <url> | sha256sum`. Update whenever
+# the pinned bore version changes.
+BORE_SHA256_I686="8f97a4a0c015db3f28665d56e748687ec886ba627609635903742963114369d3"
+
 VPS_IP="${1:-}"
 BORE_SECRET="${2:-}"
 
@@ -39,6 +44,7 @@ fi
 echo "[2/4] Downloading bore v0.6.0 (i686-musl)..."
 cd /tmp
 curl -sL "https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-i686-unknown-linux-musl.tar.gz" -o bore-i686.tar.gz
+echo "$BORE_SHA256_I686  bore-i686.tar.gz" | sha256sum -c -
 tar xzf bore-i686.tar.gz
 cp bore /usr/local/bin/bore
 chmod +x /usr/local/bin/bore
