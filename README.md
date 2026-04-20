@@ -311,6 +311,29 @@ export HOMEBREW_FORCE_BREWED_CURL=1
 # Always: cd / before calling chroot (avoids bad getcwd from inherited CWD)
 ```
 
+
+## iSH-AOK — Recommended Upgrade
+
+iSH-AOK ([github.com/emkey1/ish-AOK](https://github.com/emkey1/ish-AOK)) is the recommended
+replacement for stock iSH. It is a maintained fork with direct benefits for this lab:
+
+| Benefit | Detail |
+|---|---|
+| `/dev/rtc` | Unblocks Debian 11 / Devuan init — required for `apt` of glibc packages |
+| `clock_nanosleep_time64` | Fixes `sleep` in Debian chroot — unblocks `libc6` install |
+| `/proc/ish/host_info` | Hardware model + OS version readable from inside the shell |
+| `/proc/ish/BAT0` + sysfs | Battery level and charge status |
+| `/proc/ish/UIDevice` | Device orientation + low power mode |
+| vim/vi `^Z` fix | No more hangs on suspend or exit |
+| 10-15% perf improvement | Rewritten internal locking — benefits bore tunnel + SSH throughput |
+| amd64 port (planned) | Will eliminate all musl wrapper hacks and i386 Homebrew patches |
+
+**Install:** TestFlight beta at [testflight.apple.com/join/X1flyiqE](https://testflight.apple.com/join/X1flyiqE)
+
+**Full migration guide:** [ISH_AOK_UPGRADE.md](ISH_AOK_UPGRADE.md)
+
+No changes needed to `start-lab.sh`, `AUTO_START.sh`, or `PERPLEXITY_LOAD.sh` after switching.
+
 ### Status (2026-04-20)
 
 - `brew --version` confirmed working
