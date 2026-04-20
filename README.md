@@ -128,8 +128,10 @@ exec /usr/local/musl/lib/ld-musl-i386.so.1 \
 ## Perplexity SSH Connection
 
 ```
-Host: bore.pub  Port: 40188  User: root  Pass: SunTzu612
+Host: bore.pub  Port: 40188  User: root  Pass: (set POCKET_LAB_SSH_PASS in your shell; key-based auth recommended, see SECURITY.md)
 ```
+
+> **Note:** The previously-hardcoded password has been rotated and must no longer be used. Set `POCKET_LAB_SSH_PASS` in your shell before running `PERPLEXITY_LOAD.sh`, or switch to SSH key authentication as described in `SECURITY.md`.
 
 > Tunnel drops when iSH backgrounds. Run `/root/start-lab.sh` in iSH to restore.
 

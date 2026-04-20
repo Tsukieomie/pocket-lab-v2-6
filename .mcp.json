@@ -1,0 +1,18 @@
+{
+  "_comment": "AUTH_TOKEN is read from the PERPLEXITY_AGENT_TOKEN environment variable. Export it in your shell before launching Claude Code. See SECURITY.md for rotation details.",
+  "mcpServers": {
+    "agent_handler": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@latest",
+        "https://agent-proxy.perplexity.ai/merge_mcp",
+        "--header",
+        "Authorization: Bearer ${AUTH_TOKEN}"
+      ],
+      "env": {
+        "AUTH_TOKEN": "${PERPLEXITY_AGENT_TOKEN}"
+      }
+    }
+  }
+}

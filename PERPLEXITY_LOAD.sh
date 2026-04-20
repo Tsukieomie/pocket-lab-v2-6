@@ -12,7 +12,10 @@
 
 BORE_HOST="bore.pub"
 BORE_PORT="40188"
-SSH_PASS="SunTzu612"
+# SSH password is read from env. Set POCKET_LAB_SSH_PASS before running.
+# Prefer key-based auth (see SECURITY.md). The previously-hardcoded password
+# has been rotated and must no longer be used.
+SSH_PASS="${POCKET_LAB_SSH_PASS:?set POCKET_LAB_SSH_PASS in env}"
 PDF_SHA="38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134"
 APPROVAL_REPO="Tsukieomie/pocket-lab-approvals"
 APPROVAL_CURVE="secp256k1"
