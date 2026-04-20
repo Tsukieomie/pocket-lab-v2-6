@@ -1,6 +1,14 @@
-# Pocket Security Lab v2.7
+# Pocket Security Lab v2.8
 
 GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab bundle.
+
+## What's new in v2.8
+
+- **Ruby fixed in Debian chroot** — iSH 4.20.69 does not support `FUTEX_WAIT_BITSET` (futex op 137), which kills glibc-linked ruby/git with SIGSYS (exit 159). Fixed by installing Alpine musl-linked ruby 2.7.8 wrappers at `/mnt/debian/usr/local/bin/ruby` and `/mnt/debian/usr/local/bin/git`
+- **LD_PRELOAD getcwd fix** — compiled `libgetcwd_fix.so` strips the `/mnt/debian` host prefix from `getcwd()` so Alpine git resolves paths correctly inside the chroot
+- **Full git workflow** — `git init`, `git add`, `git commit`, `git log` all working inside `debian#` chroot
+- **gem list** fully functional — all default gems (benchmark, csv, date, openssl, etc.) available
+- **musl stdlib tree** installed at `/mnt/debian/usr/local/musl/` with all shared libs
 
 ## What's new in v2.7
 
@@ -54,15 +62,76 @@ GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab b
 /root/debian.sh       # enter chroot (prompt: debian#)
 gcc --version         # Debian 10.2.1
 curl --version        # 7.74.0 with full SSL
+ruby --version        # 2.7.8 [i586-linux-musl] via Alpine musl wrapper
+git --version         # 2.32.7 via Alpine musl wrapper + getcwd fix
+gem list              # all default gems available
 ```
 
 Source: [debian-ish-rootfs](https://github.com/Tsukieomie/debian-ish-rootfs)
 
+## Ruby / Git in chroot — Technical Notes
+
+### Root cause
+iSH kernel 4.20.69 does not implement `FUTEX_WAIT_BITSET` (futex operation 137).  
+glibc's `libpthread` calls this at startup → all Debian ruby/git binaries crash with `SIGSYS` (exit 159).  
+`mount --bind` also fails on iSH ("Bad address") so we cannot overlay `/proc`.
+
+### Fix
+1. Alpine's ruby/git are musl-linked — no pthreads dependency, run fine on iSH.
+2. Copied Alpine binaries + shared libs to `/mnt/debian/usr/local/musl/`.
+3. Created shell wrappers at `/mnt/debian/usr/local/bin/{ruby,gem,git}` that invoke the musl linker directly with correct `--library-path`.
+4. Compiled `libgetcwd_fix.so` (Alpine gcc) — LD_PRELOAD shim that strips the `/mnt/debian` host prefix from `getcwd()`, preventing Alpine git from resolving chroot-relative paths back to host paths.
+5. `/root/debian.sh` sets `PATH=/usr/local/bin:...` so wrappers are found first.
+
+### Key paths
+| Path | Purpose |
+|---|---|
+| `/mnt/debian/usr/local/bin/ruby` | musl ruby wrapper |
+| `/mnt/debian/usr/local/bin/gem` | musl gem wrapper |
+| `/mnt/debian/usr/local/bin/git` | musl git wrapper (with getcwd fix) |
+| `/mnt/debian/usr/local/musl/` | Alpine musl binaries + libs tree |
+| `/mnt/debian/usr/local/musl/lib/libgetcwd_fix.so` | getcwd LD_PRELOAD fix |
+| `/mnt/debian/usr/local/musl/usr/lib/ruby/2.7.0/` | Ruby stdlib |
+| `/mnt/debian/usr/local/musl/usr/lib/ruby/2.7.0/i586-linux-musl/` | Ruby C extensions (rbconfig, etc.) |
+| `/mnt/debian/dev/null` | Created with mknod (needed by git) |
+| `/mnt/debian/root/.gitconfig` | Pre-seeded git config (user + safe.directory=*) |
+
+### What still uses Debian binaries
+- `/bin/sh` (dash) — works fine, no pthreads
+- `gcc --version` — works (just `--version`, no compilation)
+- `curl` — works (fully SSL capable)
+- `apt-get` — still broken (glibc + pthreads)
+
+### Wrapper contents (reference)
+
+```sh
+# /mnt/debian/usr/local/bin/ruby
+#!/bin/sh
+export HOME=/root
+export RUBYLIB=/usr/local/musl/usr/lib/ruby/2.7.0:/usr/local/musl/usr/lib/ruby/2.7.0/i586-linux-musl
+export GEM_PATH=/usr/local/musl/usr/lib/gems:/usr/local/musl/usr/lib/ruby/gems/2.7.0
+export GEM_HOME=/usr/local/musl/usr/lib/gems
+export LD_PRELOAD=/usr/local/musl/lib/libgetcwd_fix.so
+exec /usr/local/musl/lib/ld-musl-i386.so.1 \
+  --library-path /usr/local/musl/lib:/usr/local/musl/usr/lib \
+  /usr/local/musl/bin/ruby "$@"
+
+# /mnt/debian/usr/local/bin/git
+#!/bin/sh
+export HOME=/root
+export LD_PRELOAD=/usr/local/musl/lib/libgetcwd_fix.so
+exec /usr/local/musl/lib/ld-musl-i386.so.1 \
+  --library-path /usr/local/musl/lib:/usr/local/musl/usr/lib \
+  /usr/local/musl/bin/git "$@"
+```
+
 ## Perplexity SSH Connection
 
 ```
-Host: bore.pub  Port: 40188  User: root
+Host: bore.pub  Port: 40188  User: root  Pass: SunTzu612
 ```
+
+> Tunnel drops when iSH backgrounds. Run `/root/start-lab.sh` in iSH to restore.
 
 ## Artifact hashes (v2.4 bundle, still active vault)
 
