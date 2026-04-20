@@ -1,0 +1,52 @@
+{
+  "name": "Pocket Security Lab",
+  "version": "2.6",
+  "created_utc": "2026-04-20T02:17:54Z",
+  "changelog": [
+    "v2.6: Perplexity Computer SSH integration — two-way live connection",
+    "v2.6: Fixed verify_pocket_lab_v2_4.sh to use correct signing key (ish_startup_signing_secp256k1.pub)",
+    "v2.6: Added OPEN_POCKET_LAB_V2_6.sh with dual-gate (signed GitHub approval + startup verify)",
+    "v2.6: Added STATUS_V2_6.sh — unified status report across all lab versions",
+    "v2.6: Added verify_pocket_lab_v2_6.sh — verifies v2.4 artifacts + v2.6 manifest chain",
+    "v2.6: Bore tunnel auto-reconnect awareness documented",
+    "v2.6: GitHub repo pocket-lab-v2-6 created with updated artifacts and workflow"
+  ],
+  "policy": {
+    "pdf_self_execution": false,
+    "fail_closed": true,
+    "trust_on_first_use": false,
+    "skip_flags_allowed": false,
+    "private_keys_in_bundle": false,
+    "hash_prefix_match_allowed": false,
+    "proceed_anyway_allowed": false,
+    "perplexity_ssh_access": true,
+    "github_approval_required": true,
+    "signed_approval_required": true
+  },
+  "signing": {
+    "algorithm": "ECDSA-secp256k1-SHA256",
+    "ish_startup_signing_pubkey_sha256": "ad8a5bf4990f1479ad81dca12730ec690ff6a0483c0aca9e08112beced0b7ff3",
+    "github_approval_pubkey_sha256": "84758a2db2bd28f4ca900de4a2ec2eddea024287ba26dea31ea328980d9da6ab"
+  },
+  "tunnel": {
+    "type": "bore",
+    "host": "bore.pub",
+    "public_port": 40188,
+    "local_ssh_port": 2222,
+    "start_script": "/root/start-lab.sh"
+  },
+  "artifacts": [
+    {
+      "path": "pocket_security_lab_v2_4_integrated.pdf",
+      "role": "inert trigger and reference",
+      "sha256": "38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134",
+      "sha256d": "7db0b26e9e4897b97284ccc16d3426cdbf3fa4435eaf80f261d3768e5d4f439d"
+    },
+    {
+      "path": "pocket_security_lab_v2_4.tar.enc",
+      "role": "encrypted lab archive",
+      "sha256": "3201076f28cd6a6978586e18ce23c2c9851a73a0c6d357382fc44361758b9493",
+      "sha256d": "2e8026c6bb6415faf0acf7a2403b112231609413af87125a0b0ea8ae5e3f4227"
+    }
+  ]
+}

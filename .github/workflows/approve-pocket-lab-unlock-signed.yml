@@ -1,0 +1,58 @@
+name: Approve Pocket Lab Unlock Signed
+
+on:
+  workflow_dispatch:
+    inputs:
+      pdf_sha256:
+        description: 'PDF SHA-256 (from iSH nonce output)'
+        required: true
+      nonce:
+        description: 'Nonce (from iSH nonce output)'
+        required: true
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create signed approval
+        env:
+          PDF_SHA256: ${{ github.event.inputs.pdf_sha256 }}
+          NONCE: ${{ github.event.inputs.nonce }}
+          APPROVED_BY: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
+          SIGNING_KEY: ${{ secrets.POCKET_LAB_APPROVAL_SIGNING_KEY }}
+        run: |
+          NONCE_SHA256=$(echo -n "$NONCE" | sha256sum | awk '{print $1}')
+          APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EXPIRES_AT=$(date -u -d '+5 minutes' +%Y-%m-%dT%H:%M:%SZ)
+
+          mkdir -p approvals
+          cat > approvals/current.json << JSON
+          {
+            "schema": "pocket_lab_signed_approval_v1",
+            "approved": true,
+            "pdf_sha256": "$PDF_SHA256",
+            "nonce_sha256": "$NONCE_SHA256",
+            "approved_by": "$APPROVED_BY",
+            "approved_at_utc": "$APPROVED_AT",
+            "expires_at_utc": "$EXPIRES_AT",
+            "repo": "${{ github.repository }}",
+            "run_id": "$RUN_ID",
+            "approval_pubkey_sha256": "84758a2db2bd28f4ca900de4a2ec2eddea024287ba26dea31ea328980d9da6ab"
+          }
+          JSON
+
+          echo "$SIGNING_KEY" | base64 -d > /tmp/signing.key
+          openssl dgst -sha256 -sign /tmp/signing.key \
+            -out approvals/current.json.sig approvals/current.json
+          rm -f /tmp/signing.key
+
+          git config user.name "Pocket Lab Bot"
+          git config user.email "bot@pocket-lab"
+          git add approvals/
+          git commit -m "Signed approval for run $RUN_ID by $APPROVED_BY"
+          git push

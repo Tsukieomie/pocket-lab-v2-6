@@ -1,0 +1,35 @@
+============================================================
+POCKET SECURITY LAB v2.6 — COMMANDS
+============================================================
+
+Open lab (full dual-gate):
+  /root/perplexity/OPEN_POCKET_LAB_V2_6.sh
+
+Unified status:
+  /root/perplexity/STATUS_V2_6.sh
+
+v2.6 verify only:
+  /root/perplexity/verify_pocket_lab_v2_6.sh
+
+v2.4 PDF verify:
+  /root/perplexity/verify_pocket_lab_v2_4.sh
+
+Lock (remove plaintext):
+  /root/.pocket_lab_secure/lock-pocket-lab.sh
+
+Tamper check:
+  /root/.pocket_lab_secure/tamper-alert.sh check
+
+Generate signed approval nonce:
+  . /root/.pocket_lab_secure/signed-approval-config
+  /root/.pocket_lab_secure/pocket-lab-signed-approval.sh nonce
+
+Tunnel refresh:
+  /root/start-lab.sh
+
+Perplexity SSH connection:
+  Host: bore.pub  Port: 40188  User: root
+
+Review GitHub repo:
+  /root/perplexity/REVIEW_GITHUB_REPO.sh https://github.com/OWNER/REPO
+============================================================

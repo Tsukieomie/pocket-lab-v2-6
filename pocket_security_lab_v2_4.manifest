@@ -1,0 +1,26 @@
+{
+  "name": "Pocket Security Lab",
+  "version": "2.4-integrated",
+  "created_utc": "2026-04-20T00:49:21Z",
+  "policy": {
+    "pdf_self_execution": false,
+    "fail_closed": true,
+    "trust_on_first_use": false,
+    "skip_flags_allowed": false,
+    "private_keys_in_bundle": false,
+    "hash_prefix_match_allowed": false,
+    "proceed_anyway_allowed": false
+  },
+  "signing": {
+    "algorithm": "ECDSA-secp256k1-SHA256",
+    "public_key_sha256": "ad8a5bf4990f1479ad81dca12730ec690ff6a0483c0aca9e08112beced0b7ff3"
+  },
+  "artifacts": [
+    {
+      "path": "pocket_security_lab_v2_4_integrated.pdf",
+      "sha256": "38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134",
+      "sha256d": "7db0b26e9e4897b97284ccc16d3426cdbf3fa4435eaf80f261d3768e5d4f439d",
+      "role": "inert trigger and reference"
+    }
+  ]
+}
