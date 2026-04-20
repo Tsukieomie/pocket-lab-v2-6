@@ -29,20 +29,22 @@ static int my_strncmp(const char *a, const char *b, unsigned long n) {
 }
 
 #define CHROOT_PREFIX "/mnt/debian"
-#define PREFIX_LEN    11
+#define PREFIX_LEN    (sizeof(CHROOT_PREFIX) - 1)
 
 /* Override getcwd for BOTH musl and glibc programs */
 char *getcwd(char *buf, unsigned long size) {
     long ret;
+    /*
+     * On i386 PIC/PIE, %ebx is reserved for the GOT. We can't clobber it
+     * with a plain "mov ... %%ebx" and list it in clobbers — the compiler
+     * won't save/restore %ebx for us. Use the "b" input constraint so gcc
+     * emits the right save/restore around the asm block.
+     */
     __asm__ volatile (
-        "mov $183, %%eax\n\t"
-        "mov %1, %%ebx\n\t"
-        "mov %2, %%ecx\n\t"
         "int $0x80\n\t"
-        "mov %%eax, %0"
-        : "=r"(ret)
-        : "r"(buf), "r"(size)
-        : "eax", "ebx", "ecx", "memory"
+        : "=a"(ret)
+        : "a"(183), "b"(buf), "c"(size)
+        : "memory"
     );
     if (ret < 0) return (char *)0;
 
