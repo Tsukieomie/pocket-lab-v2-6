@@ -1,13 +1,22 @@
-# Pocket Security Lab v2.6
+# Pocket Security Lab v2.7
 
 GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab bundle.
+
+## What's new in v2.7
+
+- **Debian Bullseye i386 chroot** installed at `/mnt/debian` via Perplexity Computer automation
+- **gcc 10.2.1** and **curl 7.74.0** verified working inside chroot
+- **Entry script** `/root/debian.sh` — drops into `debian#` prompt
+- **Updated start-lab.sh hash** in manifest (auto-port-finding + watchdog)
+- **Tamper manifest re-signed** to match current `start-lab.sh`
+- **debian-ish-rootfs** GitHub release published with v1 + v2 tarballs
 
 ## What's new in v2.6
 
 - **Perplexity Computer live SSH connection** via bore.pub tunnel
-- **Fixed** `verify_pocket_lab_v2_4.sh` — now uses correct `ish_startup_signing_secp256k1.pub` key
-- **`OPEN_POCKET_LAB_V2_6.sh`** — three-gate opener: startup verify → signed GitHub approval → v2.6 unified verify → unlock
-- **`STATUS_V2_6.sh`** — unified status across all versions (tamper, v2.3, v2.4, v2.6, tunnel, approval)
+- **Fixed** `verify_pocket_lab_v2_4.sh` — correct signing key
+- **`OPEN_POCKET_LAB_V2_6.sh`** — three-gate opener
+- **`STATUS_V2_6.sh`** — unified status across all versions
 - **`verify_pocket_lab_v2_6.sh`** — full chain verifier
 
 ## Security model
@@ -20,6 +29,9 @@ GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab b
 ## Quick commands (in iSH)
 
 ```sh
+# Enter Debian chroot
+/root/debian.sh
+
 # Full three-gate open
 /root/perplexity/OPEN_POCKET_LAB_V2_6.sh
 
@@ -31,17 +43,26 @@ GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab b
 
 # Lock (remove plaintext)
 /root/.pocket_lab_secure/lock-pocket-lab.sh
+
+# Tunnel refresh
+/root/start-lab.sh
 ```
 
-## Approval flow
+## Debian Chroot
 
-1. In iSH, generate a nonce:
-   ```sh
-   . /root/.pocket_lab_secure/signed-approval-config
-   /root/.pocket_lab_secure/pocket-lab-signed-approval.sh nonce
-   ```
-2. Trigger **Actions → Approve Pocket Lab Unlock Signed** and enter the nonce + PDF hash.
-3. Run `OPEN_POCKET_LAB_V2_6.sh` — it fetches and verifies the approval automatically.
+```sh
+/root/debian.sh       # enter chroot (prompt: debian#)
+gcc --version         # Debian 10.2.1
+curl --version        # 7.74.0 with full SSL
+```
+
+Source: [debian-ish-rootfs](https://github.com/Tsukieomie/debian-ish-rootfs)
+
+## Perplexity SSH Connection
+
+```
+Host: bore.pub  Port: 40188  User: root
+```
 
 ## Artifact hashes (v2.4 bundle, still active vault)
 
