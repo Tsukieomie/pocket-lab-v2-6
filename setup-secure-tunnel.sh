@@ -7,6 +7,13 @@
 # ============================================================
 set -eu
 
+# Pinned SHA-256 sums for bore v0.6.0 release assets. Verified upstream
+# via `curl -sL <url> | sha256sum` on 2026-04-20. Update these whenever
+# the pinned bore version changes.
+BORE_SHA256_X86_64="e484d1e3acba77169b773f31a5bfb34192d4b660f44a094a658a2522cd2270f7"
+BORE_SHA256_AARCH64="ffc4515f3617420b243758cf36ed6a63208d7dba76b2ec3e90d1f476a9742951"
+BORE_SHA256_ARMV7="d8c93e3c3d3da043bb9aa19fee1359f2160f5e9d4a146d69995e97307ce9067e"
+
 echo "╔══════════════════════════════════════════════════════╗"
 echo "║   POCKET LAB — SECURE BORE SERVER SETUP             ║"
 echo "╚══════════════════════════════════════════════════════╝"
@@ -16,14 +23,18 @@ echo ""
 echo "[1/5] Downloading bore v0.6.0..."
 ARCH=$(uname -m)
 case "$ARCH" in
-  x86_64)  BORE_ARCH="x86_64-unknown-linux-musl" ;;
-  aarch64) BORE_ARCH="aarch64-unknown-linux-musl" ;;
-  armv7*)  BORE_ARCH="armv7-unknown-linux-musleabihf" ;;
+  x86_64)  BORE_ARCH="x86_64-unknown-linux-musl"; EXPECTED_SHA256="$BORE_SHA256_X86_64" ;;
+  aarch64) BORE_ARCH="aarch64-unknown-linux-musl"; EXPECTED_SHA256="$BORE_SHA256_AARCH64" ;;
+  armv7*)  BORE_ARCH="armv7-unknown-linux-musleabihf"; EXPECTED_SHA256="$BORE_SHA256_ARMV7" ;;
   *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
 cd /tmp
-curl -sL "https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-${BORE_ARCH}.tar.gz" | tar xz
+TARBALL="bore-v0.6.0-${BORE_ARCH}.tar.gz"
+curl -sL "https://github.com/ekzhang/bore/releases/download/v0.6.0/${TARBALL}" -o "$TARBALL"
+echo "$EXPECTED_SHA256  $TARBALL" | sha256sum -c -
+tar xzf "$TARBALL"
+rm -f "$TARBALL"
 sudo mv bore /usr/local/bin/bore
 sudo chmod +x /usr/local/bin/bore
 echo "   Installed: $(bore --version)"
