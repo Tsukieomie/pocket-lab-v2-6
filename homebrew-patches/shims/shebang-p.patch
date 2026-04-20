@@ -1,0 +1,26 @@
+--- a/Library/Homebrew/shims/shared/curl
++++ b/Library/Homebrew/shims/shared/curl
+@@ -1,4 +1,4 @@
+-#!/bin/bash -p
++#!/bin/bash
++# PATCH iSH: removed -p flag — bash -p calls getcwd() at startup which fails
++# inside the Debian chroot on iSH kernel 4.20.69 (getcwd: Bad file descriptor)
+
+ # Make our $HOMEBREW_CURL selection universal - including in formulae usage.
+
+--- a/Library/Homebrew/shims/shared/svn
++++ b/Library/Homebrew/shims/shared/svn
+@@ -1,2 +1,2 @@
+-#!/bin/bash -p
++#!/bin/bash
+ # PATCH iSH: removed -p flag (same getcwd issue)
+
+--- a/Library/Homebrew/shims/shared/git
++++ b/Library/Homebrew/shims/shared/git
+@@ -1,2 +1,2 @@
+-#!/bin/bash -p
++#!/bin/bash
+ # PATCH iSH: removed -p flag (same getcwd issue)
+
+# Same patch applies to shims/super/ and shims/linux/super/ variants of curl, svn, git
+# brew_apply_patches.sh handles all variants automatically

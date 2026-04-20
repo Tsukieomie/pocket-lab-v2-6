@@ -1,0 +1,21 @@
+--- a/Library/Homebrew/standalone/init.rb
++++ b/Library/Homebrew/standalone/init.rb
+@@ -6,6 +6,12 @@
+ # frozen_string_literal: true
+ 
+ required_ruby_major, required_ruby_minor, = ENV.fetch("HOMEBREW_REQUIRED_RUBY_VERSION", "").split(".").map(&:to_i)
++# PATCH iSH: accept Ruby 3.x when Homebrew requires 4.0 (musl ruby 3.4.9 on iSH)
++# Without this, Homebrew raises "must be run under Ruby 4.0" at line 18
++if required_ruby_major.nil? || required_ruby_major >= 4
++  required_ruby_major = 3
++  required_ruby_minor = 0
++end
+ gems_vendored = if required_ruby_minor.nil?
+   # We're likely here if running RuboCop etc, so just assume we don't need to install gems as we likely already have
+   true
+@@ -20,7 +26,8 @@ gems_vendored = if required_ruby_minor.nil?
+ 
+-  vendored_versions = ["4.0"].freeze
++  vendored_versions = ["4.0", "3.4", "3.3", "3.2", "3.1", "3.0"].freeze  # PATCH iSH: allow Ruby 3.x
+   vendored_versions.include?("#{ruby_major}.#{ruby_minor}")
+ end.freeze

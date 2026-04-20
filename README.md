@@ -246,3 +246,46 @@ with the active private key so GitHub Actions path also works once runners are r
 | `pocket_security_lab_v2_4.manifest.sig` invalid | Re-signed with `ish_startup_signing_secp256k1.key` |
 | `pocket_security_lab_v2_3.manifest.sig` invalid | Re-signed with `pocket_lab_secp256k1.key` |
 | GitHub Actions `startup_failure` blocking Gate 2 | Perplexity Computer direct signing path |
+
+## Homebrew on iSH — Compatibility Patches
+
+Homebrew is installed at `/mnt/debian/home/linuxbrew/.linuxbrew/` (Debian chroot).
+Five compatibility patches are required to make it work on iSH kernel 4.20.69.
+
+### Quick Re-Apply
+
+```sh
+# After any brew update or fresh Homebrew clone:
+sh /root/perplexity/brew_apply_patches.sh
+
+# Test:
+sh /root/perplexity/brew_test_hello.sh
+```
+
+### What Gets Patched
+
+| File | Problem | Fix Applied |
+|---|---|---|
+| `standalone/init.rb` | Requires Ruby 4.0; we have musl 3.4.9 | Override required version to 3.x when ≥ 4 |
+| `vendor/bundle/ruby/3.4.0` | sorbet-runtime gem not found by Ruby 3.x | Symlink `3.4.0 → 4.0.0` |
+| `shims/shared/curl|svn|git` | `bash -p` causes `getcwd()` failure in chroot | Remove `-p` flag from all shim shebangs |
+| `shims/utils.sh` | `< <(type -aP)` needs `/dev/fd` (unavailable on iSH) | Replace with `<<< "$(type -aP ...)"` |
+| `/usr/local/bin/curl` (chroot) | glibc curl hits unsupported iSH syscalls | musl curl wrapper via `ld-musl-1.2.6-i386.so.1` |
+
+Full documentation and individual patch files: [`homebrew-patches/`](homebrew-patches/)
+
+### Required Brew Env Vars
+
+```sh
+export GEM_PATH=/home/linuxbrew/.linuxbrew/Homebrew/Library/Homebrew/vendor/bundle/ruby/3.4.0
+export BUNDLE_PATH=/home/linuxbrew/.linuxbrew/Homebrew/Library/Homebrew/vendor/bundle
+export HOMEBREW_CURL=/usr/local/bin/curl
+export HOMEBREW_FORCE_BREWED_CURL=1
+# + standard HOMEBREW_PREFIX, CELLAR, REPOSITORY, GIT_PATH, RUBY_PATH, DEVELOPER vars
+# Always: cd / before calling chroot (avoids bad getcwd from inherited CWD)
+```
+
+### Status (2026-04-20)
+
+- `brew --version` ✅ confirmed working
+- `brew install hello` ⏳ in progress (tunnel dropped mid-install — patches applied on device)

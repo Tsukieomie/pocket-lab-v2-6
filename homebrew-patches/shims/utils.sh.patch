@@ -1,0 +1,14 @@
+--- a/Library/Homebrew/shims/utils.sh
++++ b/Library/Homebrew/shims/utils.sh
+@@ -84,7 +84,8 @@ try_exec_non_system() {
+   local path
+   while read -r path
+   do
+     if [[ "${path}" != "/usr/bin/${file}" ]]
+     then
+       safe_exec "${path}" "$@"
+     fi
+-  done < <(type -aP "${file}")
++  done <<< "$(type -aP "${file}")"
++  # PATCH iSH: replaced < <(...) process substitution — iSH kernel has no /dev/fd support
+ }
