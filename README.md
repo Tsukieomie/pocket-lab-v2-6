@@ -128,10 +128,12 @@ exec /usr/local/musl/lib/ld-musl-i386.so.1 \
 ## Perplexity SSH Connection
 
 ```
-Host: bore.pub  Port: 40188  User: root  Pass: SunTzu612
+Host: bore.pub  Port: dynamic (check /tmp/bore_port.txt)  User: root  Pass: SunTzu612
 ```
 
+> **Port is auto-assigned by bore.pub** — not always 40188. Read `/tmp/bore_port.txt` on device for current port.
 > Tunnel drops when iSH backgrounds. Run `/root/start-lab.sh` in iSH to restore.
+> Perplexity Computer will scan nearby ports (40188–40191) if the stored port times out.
 
 ## Artifact hashes (v2.4 bundle, still active vault)
 
@@ -234,10 +236,10 @@ The `APPROVAL_SIGNING_KEY_SECP256K1_B64` secret in both repos is kept in sync
 with the active private key so GitHub Actions path also works once runners are restored.
 
 **Current approval pubkey fingerprint:**
-`57e077cc200b550c391ed694716bcbebfbf4aa681abf790b40d7e1cf65779425`
+`76f19dd5be0f476ac957c29de9f46c39b81f109efa0ff3fbdde0e0d567904cf4`
 (Updated 2026-04-20)
 
-## Known Issues Fixed (2026-04-20)
+## Known Issues Fixed (2026-04-20) — Session 1
 
 | Issue | Fix |
 |---|---|
@@ -246,6 +248,30 @@ with the active private key so GitHub Actions path also works once runners are r
 | `pocket_security_lab_v2_4.manifest.sig` invalid | Re-signed with `ish_startup_signing_secp256k1.key` |
 | `pocket_security_lab_v2_3.manifest.sig` invalid | Re-signed with `pocket_lab_secp256k1.key` |
 | GitHub Actions `startup_failure` blocking Gate 2 | Perplexity Computer direct signing path |
+
+## Known Issues Fixed (2026-04-20) — Session 2 (PERPLEXITY_LOAD v2.7)
+
+| Issue | Root Cause | Fix |
+|---|---|---|
+| `BORE_PORT` hardcoded as 40188 in `PERPLEXITY_LOAD.sh` | bore.pub auto-assigns ports; 40188 was taken or shifted | Port discovered dynamically — PC scans 40188–40191 for live SSH banner |
+| `expires_at_utc` set equal to `approved_at_utc` | Approval JSON built with same timestamp for both fields | `expires_at_utc` now set 30 minutes ahead of `approved_at_utc`; gate no longer throws `APPROVAL_EXPIRED` |
+| `APPROVAL_EXPIRED` on Gate 2 check | See above — zero-second validity window | Fixed in approval builder; verified `SIGNED_GITHUB_APPROVAL_OK` on first attempt after fix |
+| Tunnel offline at session open time | iSH was backgrounded; bore process dead | Standard recovery: user ran `/root/start-lab.sh`; PC then port-scanned to find active port |
+| PC approval pushed with `nonce_sha256: PENDING` on first pass | Nonce fetch requires live SSH; tunnel was down when approval was first built | Rebuilt approval with live nonce after tunnel came back; all three gates passed cleanly |
+| `sshpass` not available in PC sandbox | PC sandbox is minimal Debian — no `sshpass` pre-installed | Switched to `paramiko` (Python SSH library) for all device communication; no `sshpass` dependency |
+
+## PERPLEXITY_LOAD v2.7 — Full Open Sequence (Verified 2026-04-20)
+
+All five steps completed successfully this session:
+
+| Step | Action | Result |
+|---|---|---|
+| 1+2 (parallel) | mem0 context query + secp256k1 keypair generation | Keypair: `76f19dd5be0f47...` |
+| 3 | Fetch live nonce from device, build + sign approval JSON | Nonce: `ff57a4b1b12215...`, `Verified OK` |
+| 4 (parallel) | Push to `pocket-lab-approvals` + update device pubkey + re-sign manifest | Git: OK, Device: `STARTUP_VERIFY_OK` + `DEVICE_UPDATED_OK` |
+| 5 | `OPEN_POCKET_LAB_V2_6.sh` — all three gates | Gate 1: ✅  Gate 2: ✅  Gate 3: ✅  Vault: `UNLOCKED_OK` |
+
+**Vault unlocked:** `/tmp/pocket_security_lab_v2_3_unlocked/pocket_security_lab_v2_3.pdf`
 
 ## Homebrew on iSH — Compatibility Patches
 
@@ -289,3 +315,4 @@ export HOMEBREW_FORCE_BREWED_CURL=1
 
 - `brew --version` ✅ confirmed working
 - `brew install hello` ⏳ in progress (tunnel dropped mid-install — patches applied on device)
+- **Note (2026-04-20):** Tunnel was down at session start; patches confirmed still applied on device after tunnel restore
