@@ -219,7 +219,20 @@ export HOMEBREW_GIT_PATH=/usr/local/bin/git
 export HOMEBREW_RUBY_PATH=/usr/local/bin/ruby
 ```
 
-## Perplexity Computer Direct Signing (Gate 2 Bypass)
+## Perplexity Computer Direct Signing (Gate 2 Bypass — Recovery Only)
+
+> **Disabled by default.** This path is now gated behind the
+> `POCKET_LAB_SELF_SIGN=1` environment variable. When enabled, a fresh
+> approval keypair is generated on the device and used to sign both the
+> approval JSON and the on-device manifest — which collapses Gate 2 to
+> "the device vouches for itself". Only use this when GitHub Actions is
+> unavailable and you accept that Gate 2 is effectively bypassed. See
+> `SECURITY.md` for the full threat-model discussion.
+>
+> ```sh
+> export POCKET_LAB_SELF_SIGN=1
+> sh PERPLEXITY_LOAD.sh
+> ```
 
 When GitHub Actions runners are unavailable (free-tier minutes exhausted, `startup_failure`),
 Perplexity Computer can act as the approval signer directly:

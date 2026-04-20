@@ -36,36 +36,49 @@ echo "║     PERPLEXITY LOAD v2.7 — POCKET LAB FAST OPEN    ║"
 echo "╚══════════════════════════════════════════════════════╝"
 
 # ── STEP 1 + 2: Parallel — mem0 query & keypair generation ─
-echo "[1+2/5] mem0 query + keypair (parallel)..."
+# Device-local self-signing is a RECOVERY PATH ONLY. It generates a fresh
+# approval keypair on the device and uses it to sign both the approval JSON
+# and the on-device manifest — collapsing Gate 2 to "the device vouches for
+# itself". Off by default; set POCKET_LAB_SELF_SIGN=1 to opt in.
+# See SECURITY.md.
+SELF_SIGN="${POCKET_LAB_SELF_SIGN:-0}"
+if [ "$SELF_SIGN" != "1" ]; then
+  echo "[1+2/5] Self-sign disabled (POCKET_LAB_SELF_SIGN not set). Skipping keypair + approval-sign path."
+  echo "         The device is expected to already hold a fresh signed approval from the GitHub Actions workflow."
+else
+  echo "[1+2/5] mem0 query + keypair (parallel, POCKET_LAB_SELF_SIGN=1)..."
 
-# Background: generate keypair (or reuse pre-signed from AUTO_START)
-(
-  if [ -f "$PRESIGN_KEY" ] && [ -f "$PRESIGN_PUB" ] && [ -f "$PRESIGN_PUB_SHA_FILE" ]; then
-    echo "KEYPAIR_SOURCE=presigned" > /tmp/keypair_status.txt
-    echo "   Reusing AUTO_START pre-signed key."
-  else
-    openssl ecparam -name "$APPROVAL_CURVE" -genkey -noout -out /tmp/approval.key
-    openssl ec -in /tmp/approval.key -pubout -out /tmp/approval.pub 2>/dev/null
-    SHA=$(openssl pkey -pubin -in /tmp/approval.pub -outform DER \
-      | openssl dgst -sha256 -r | awk '{print $1}')
-    echo "$SHA" > "$PRESIGN_PUB_SHA_FILE"
-    cp /tmp/approval.key "$PRESIGN_KEY"
-    cp /tmp/approval.pub "$PRESIGN_PUB"
-    echo "KEYPAIR_SOURCE=generated" > /tmp/keypair_status.txt
-    echo "   Generated fresh keypair: $SHA"
-  fi
-) &
-KEYPAIR_PID=$!
+  # Background: generate keypair (or reuse pre-signed from AUTO_START)
+  (
+    if [ -f "$PRESIGN_KEY" ] && [ -f "$PRESIGN_PUB" ] && [ -f "$PRESIGN_PUB_SHA_FILE" ]; then
+      echo "KEYPAIR_SOURCE=presigned" > /tmp/keypair_status.txt
+      echo "   Reusing AUTO_START pre-signed key."
+    else
+      openssl ecparam -name "$APPROVAL_CURVE" -genkey -noout -out /tmp/approval.key
+      openssl ec -in /tmp/approval.key -pubout -out /tmp/approval.pub 2>/dev/null
+      SHA=$(openssl pkey -pubin -in /tmp/approval.pub -outform DER \
+        | openssl dgst -sha256 -r | awk '{print $1}')
+      echo "$SHA" > "$PRESIGN_PUB_SHA_FILE"
+      cp /tmp/approval.key "$PRESIGN_KEY"
+      cp /tmp/approval.pub "$PRESIGN_PUB"
+      echo "KEYPAIR_SOURCE=generated" > /tmp/keypair_status.txt
+      echo "   Generated fresh keypair: $SHA"
+    fi
+  ) &
+  KEYPAIR_PID=$!
 
-# Foreground: mem0 context (while keypair generates)
-echo "   Querying mem0..."
-# (Perplexity Computer queries mem0 via its own tools at session start)
-echo "   mem0 context: bypass + keys + issues + infra + AI"
+  # Foreground: mem0 context (while keypair generates)
+  echo "   Querying mem0..."
+  # (Perplexity Computer queries mem0 via its own tools at session start)
+  echo "   mem0 context: bypass + keys + issues + infra + AI"
 
-wait $KEYPAIR_PID
-NEW_PUB_SHA=$(cat "$PRESIGN_PUB_SHA_FILE")
-KEYPAIR_SOURCE=$(grep KEYPAIR_SOURCE /tmp/keypair_status.txt | cut -d= -f2)
-echo "[1+2/5] Done. Keypair: $KEYPAIR_SOURCE | PubSHA: ${NEW_PUB_SHA:0:16}..."
+  wait $KEYPAIR_PID
+  NEW_PUB_SHA=$(cat "$PRESIGN_PUB_SHA_FILE")
+  KEYPAIR_SOURCE=$(grep KEYPAIR_SOURCE /tmp/keypair_status.txt | cut -d= -f2)
+  echo "[1+2/5] Done. Keypair: $KEYPAIR_SOURCE | PubSHA: ${NEW_PUB_SHA:0:16}..."
+fi
+
+if [ "$SELF_SIGN" = "1" ]; then
 
 # ── STEP 3: Fetch nonce + build signed approval ────────────
 echo "[3/5] Fetching nonce + signing approval..."
@@ -160,6 +173,11 @@ echo "   Device updated."
 wait $GIT_PID 2>/dev/null || true
 GIT_STATUS=$(cat /tmp/git_push_status.txt 2>/dev/null || echo "GIT_PUSH=FAILED")
 echo "   Git push: $GIT_STATUS"
+
+else
+  echo "[3-4/5] Skipped (self-sign disabled). Opening lab directly — relies on an existing GitHub-signed approval."
+  KEYPAIR_SOURCE="none"
+fi  # end: if [ "$SELF_SIGN" = "1" ]
 
 # ── STEP 5: Open the lab ──────────────────────────────────
 echo "[5/5] Opening lab..."
