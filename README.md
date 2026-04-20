@@ -62,9 +62,9 @@ GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab b
 /root/debian.sh       # enter chroot (prompt: debian#)
 gcc --version         # Debian 10.2.1
 curl --version        # 7.74.0 with full SSL
-ruby --version        # 2.7.8 [i586-linux-musl] via Alpine musl wrapper
+ruby --version        # 3.4.9 [i586-linux-musl] via Alpine musl wrapper
 git --version         # 2.32.7 via Alpine musl wrapper + getcwd fix
-gem list              # all default gems available
+gem list              # 38+ default gems, bundler 2.6.9 (Ruby 3.4)
 ```
 
 Source: [debian-ish-rootfs](https://github.com/Tsukieomie/debian-ish-rootfs)
@@ -108,8 +108,8 @@ glibc's `libpthread` calls this at startup → all Debian ruby/git binaries cras
 # /mnt/debian/usr/local/bin/ruby
 #!/bin/sh
 export HOME=/root
-export RUBYLIB=/usr/local/musl/usr/lib/ruby/2.7.0:/usr/local/musl/usr/lib/ruby/2.7.0/i586-linux-musl
-export GEM_PATH=/usr/local/musl/usr/lib/gems:/usr/local/musl/usr/lib/ruby/gems/2.7.0
+export RUBYLIB=/usr/local/musl/usr/lib/ruby/3.4.0:/usr/local/musl/usr/lib/ruby/3.4.0/i586-linux-musl
+export GEM_PATH=/usr/local/musl/usr/lib/gems:/usr/local/musl/usr/lib/ruby/gems/3.4.0
 export GEM_HOME=/usr/local/musl/usr/lib/gems
 export LD_PRELOAD=/usr/local/musl/lib/libgetcwd_fix.so
 exec /usr/local/musl/lib/ld-musl-i386.so.1 \
@@ -139,3 +139,19 @@ Host: bore.pub  Port: 40188  User: root  Pass: SunTzu612
 |---|---|
 | `pocket_security_lab_v2_4_integrated.pdf` | `38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134` |
 | `pocket_security_lab_v2_4.tar.enc` | `3201076f28cd6a6978586e18ce23c2c9851a73a0c6d357382fc44361758b9493` |
+
+## Ruby 3.4 Upgrade Notes
+
+### Why musl 1.2.6 is needed
+Ruby 3.4 uses `statx()` and `qsort_r()` syscalls that were added to musl in 1.2.4. The iSH-pinned Alpine 3.14 ships musl 1.2.2 which lacks these. Solution: download `musl-1.2.6-r2.apk` from Alpine edge and place `ld-musl-1.2.6-i386.so.1` at `/mnt/debian/usr/local/musl/lib/`. Wrappers invoke this specific loader.
+
+### base64 is no longer a default gem in Ruby 3.4
+Install via: `gem install base64` or download `ruby-base64-0.2.0-r1.apk` from Alpine edge.
+
+### Key version bump
+| Component | Before | After |
+|---|---|---|
+| Ruby | 2.7.8 | 3.4.9 |
+| musl loader | 1.2.2 (host) | 1.2.6 (edge, in musl tree) |
+| RubyGems | 3.1.6 | 3.6.9 |
+| Bundler | 2.2.20 | 2.6.9 |
