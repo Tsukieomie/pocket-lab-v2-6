@@ -59,12 +59,12 @@ GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab b
 ## Debian Chroot
 
 ```sh
-/root/debian.sh       # enter chroot (prompt: debian#)
-gcc --version         # Debian 10.2.1
-curl --version        # 7.74.0 with full SSL
-ruby --version        # 3.4.9 [i586-linux-musl] via Alpine musl wrapper
-git --version         # 2.32.7 via Alpine musl wrapper + getcwd fix
-gem list              # 38+ default gems, bundler 2.6.9 (Ruby 3.4)
+/root/debian.sh # enter chroot (prompt: debian#)
+gcc --version # Debian 10.2.1
+curl --version # 7.74.0 with full SSL
+ruby --version # 3.4.9 [i586-linux-musl] via Alpine musl wrapper
+git --version # 2.32.7 via Alpine musl wrapper + getcwd fix
+gem list # 38+ default gems, bundler 2.6.9 (Ruby 3.4)
 ```
 
 Source: [debian-ish-rootfs](https://github.com/Tsukieomie/debian-ish-rootfs)
@@ -72,8 +72,8 @@ Source: [debian-ish-rootfs](https://github.com/Tsukieomie/debian-ish-rootfs)
 ## Ruby / Git in chroot — Technical Notes
 
 ### Root cause
-iSH kernel 4.20.69 does not implement `FUTEX_WAIT_BITSET` (futex operation 137).  
-glibc's `libpthread` calls this at startup → all Debian ruby/git binaries crash with `SIGSYS` (exit 159).  
+iSH kernel 4.20.69 does not implement `FUTEX_WAIT_BITSET` (futex operation 137).
+glibc's `libpthread` calls this at startup → all Debian ruby/git binaries crash with `SIGSYS` (exit 159).
 `mount --bind` also fails on iSH ("Bad address") so we cannot overlay `/proc`.
 
 ### Fix
@@ -113,22 +113,22 @@ export GEM_PATH=/usr/local/musl/usr/lib/gems:/usr/local/musl/usr/lib/ruby/gems/3
 export GEM_HOME=/usr/local/musl/usr/lib/gems
 export LD_PRELOAD=/usr/local/musl/lib/libgetcwd_fix.so
 exec /usr/local/musl/lib/ld-musl-i386.so.1 \
-  --library-path /usr/local/musl/lib:/usr/local/musl/usr/lib \
-  /usr/local/musl/bin/ruby "$@"
+ --library-path /usr/local/musl/lib:/usr/local/musl/usr/lib \
+ /usr/local/musl/bin/ruby "$@"
 
 # /mnt/debian/usr/local/bin/git
 #!/bin/sh
 export HOME=/root
 export LD_PRELOAD=/usr/local/musl/lib/libgetcwd_fix.so
 exec /usr/local/musl/lib/ld-musl-i386.so.1 \
-  --library-path /usr/local/musl/lib:/usr/local/musl/usr/lib \
-  /usr/local/musl/bin/git "$@"
+ --library-path /usr/local/musl/lib:/usr/local/musl/usr/lib \
+ /usr/local/musl/bin/git "$@"
 ```
 
 ## Perplexity SSH Connection
 
 ```
-Host: bore.pub  Port: dynamic (check /tmp/bore_port.txt)  User: root  Pass: SunTzu612
+Host: bore.pub Port: dynamic (check /tmp/bore_port.txt) User: root Pass: SunTzu612
 ```
 
 > **Port is auto-assigned by bore.pub** — not always 40188. Read `/tmp/bore_port.txt` on device for current port.
@@ -177,20 +177,20 @@ Homebrew is cloned and `brew --version` responds. Two active blockers being reso
 HOME=/mnt/debian/root \
 GIT_CONFIG_GLOBAL=/mnt/debian/root/.gitconfig \
 git clone --depth=1 https://github.com/Homebrew/brew.git \
-  /mnt/debian/home/linuxbrew/.linuxbrew/Homebrew
+ /mnt/debian/home/linuxbrew/.linuxbrew/Homebrew
 
 # Step 2: Create brew symlink
 ln -sf ../Homebrew/bin/brew /mnt/debian/home/linuxbrew/.linuxbrew/bin/brew
 
 # Step 3: Enter chroot and run brew
 chroot /mnt/debian /bin/bash -c "
-  export PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
-  export HOME=/root
-  export HOMEBREW_NO_ANALYTICS=1
-  export HOMEBREW_NO_ENV_HINTS=1
-  export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
-  export HOMEBREW_GIT_PATH=/usr/local/bin/git   # Alpine musl git wrapper
-  brew --version
+ export PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ export HOME=/root
+ export HOMEBREW_NO_ANALYTICS=1
+ export HOMEBREW_NO_ENV_HINTS=1
+ export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
+ export HOMEBREW_GIT_PATH=/usr/local/bin/git # Alpine musl git wrapper
+ brew --version
 "
 ```
 
@@ -269,7 +269,7 @@ All five steps completed successfully this session:
 | 1+2 (parallel) | mem0 context query + secp256k1 keypair generation | Keypair: `76f19dd5be0f47...` |
 | 3 | Fetch live nonce from device, build + sign approval JSON | Nonce: `ff57a4b1b12215...`, `Verified OK` |
 | 4 (parallel) | Push to `pocket-lab-approvals` + update device pubkey + re-sign manifest | Git: OK, Device: `STARTUP_VERIFY_OK` + `DEVICE_UPDATED_OK` |
-| 5 | `OPEN_POCKET_LAB_V2_6.sh` — all three gates | Gate 1: ✅  Gate 2: ✅  Gate 3: ✅  Vault: `UNLOCKED_OK` |
+| 5 | `OPEN_POCKET_LAB_V2_6.sh` — all three gates | Gate 1: Gate 2: Gate 3: Vault: `UNLOCKED_OK` |
 
 **Vault unlocked:** `/tmp/pocket_security_lab_v2_3_unlocked/pocket_security_lab_v2_3.pdf`
 
@@ -313,6 +313,6 @@ export HOMEBREW_FORCE_BREWED_CURL=1
 
 ### Status (2026-04-20)
 
-- `brew --version` ✅ confirmed working
-- `brew install hello` ⏳ in progress (tunnel dropped mid-install — patches applied on device)
+- `brew --version` confirmed working
+- `brew install hello` in progress (tunnel dropped mid-install — patches applied on device)
 - **Note (2026-04-20):** Tunnel was down at session start; patches confirmed still applied on device after tunnel restore
