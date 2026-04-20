@@ -105,12 +105,12 @@ else
   fi
 fi
 
-if pgrep -f "usr.sbin.sshd" >/dev/null 2>&1; then
+if pgrep -f "sshd: /usr" >/dev/null 2>&1; then
   SSHD_STATUS="UP"
   log "SSHD: already RUNNING — skip"
 else
   /usr/sbin/sshd 2>/dev/null || true
-  pgrep -f "usr.sbin.sshd" >/dev/null 2>&1 && SSHD_STATUS="UP"
+  pgrep -f "sshd: /usr" >/dev/null 2>&1 && SSHD_STATUS="UP"
   log "SSHD: $SSHD_STATUS"
 fi
 
