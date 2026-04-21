@@ -33,6 +33,25 @@ GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab b
 
 ---
 
+## Running in Perplexity Computer
+
+When you say **"run it"** to Perplexity Computer, it executes `run_in_perplexity.sh` — the portable subset of the three-gate chain that can run in the cloud sandbox:
+
+```sh
+sh run_in_perplexity.sh
+```
+
+| Gate | What runs here | Notes |
+|---|---|---|
+| Gate 1 | ❌ Skipped | Startup-integrity manifest lives in `/root/.pocket_lab_secure/` on-device only |
+| Gate 2 | ✅ Full Path B | Keypair generate → approval JSON build + ECDSA sign + field validate |
+| Gate 3 | ✅ Full | PDF SHA-256, tar.enc SHA-256, v2.6 manifest policy |
+| Vault decrypt | ❌ Skipped | `open-pocket-lab.sh` + decryption key on-device only |
+
+All cryptographic verification that doesn't require on-device secrets runs and must pass. Gate 1 and vault decrypt remain iSH-only by design.
+
+---
+
 ## Quick start (iSH)
 
 ```sh
