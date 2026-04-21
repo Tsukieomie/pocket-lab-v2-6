@@ -1,0 +1,32 @@
+# ============================================================
+# DEVICE PATCH: Add --local <file> mode to
+#   /root/.pocket_lab_secure/pocket-lab-signed-approval.sh
+#
+# This patch enables Gate 2 to read the signed approval from
+# a local file instead of fetching from GitHub raw.
+# Required for the v2.8 fast-open path in PERPLEXITY_LOAD.sh.
+#
+# Apply on device (iSH):
+#   sh /root/perplexity/device-patches/apply-local-mode.sh
+# ============================================================
+
+# Add this case to the bottom of pocket-lab-signed-approval.sh,
+# BEFORE the closing *) default case:
+
+# Insert after the line:  check) fetch_approval; verify_approval ;;
+#
+#   local)
+#     # --local <file>: verify a pre-signed approval from a local path
+#     # Used by PERPLEXITY_LOAD.sh v2.8 fast-open (skips GitHub fetch)
+#     LOCAL_FILE="${2:-/tmp/current.json}"
+#     LOCAL_SIG="${LOCAL_FILE}.sig"
+#     [ -f "$LOCAL_FILE" ] || { echo "LOCAL_FILE_MISSING: $LOCAL_FILE" >&2; exit 3; }
+#     [ -f "$LOCAL_SIG"  ] || { echo "LOCAL_SIG_MISSING: $LOCAL_SIG"  >&2; exit 3; }
+#     PUB="$SEC/pocket_lab_github_approval_secp256k1.pub"
+#     openssl dgst -sha256 -verify "$PUB" -signature "$LOCAL_SIG" "$LOCAL_FILE" >/dev/null \
+#       || { echo "LOCAL_SIG_INVALID" >&2; exit 3; }
+#     # Reuse existing verify_approval logic against the local file
+#     cp "$LOCAL_FILE" "$APPROVAL"
+#     cp "$LOCAL_SIG"  "${APPROVAL}.sig"
+#     verify_approval
+#     ;;
