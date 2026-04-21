@@ -326,6 +326,6 @@ log "[5/5] mem0 boot save..."
 PAYLOAD="{\"tunnel\":\"$TUNNEL_STATUS\",\"host\":\"$BORE_HOST\",\"port\":\"$BORE_PORT\",\"sshd\":\"$SSHD_STATUS\",\"debian\":\"$DEBIAN\",\"vault\":\"$VAULT_STATUS\",\"presign\":\"$PRESIGN_READY\"}"
 mem0_save_event "BOOT" "$PAYLOAD" 2>/dev/null || true
 
-log "=== AUTO_START v3.0 complete ==="
+log "=== AUTO_START v3.1 complete ==="
 
 
