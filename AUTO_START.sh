@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================
-# AUTO_START.sh — Pocket Security Lab Unified Startup (v2.9)
+# AUTO_START.sh — Pocket Security Lab Unified Startup (v3.0)
 #
 # PERF IMPROVEMENTS over v2.7:
 #   - Opens persistent SSH ControlMaster channel at boot
@@ -17,11 +17,10 @@
 # ============================================================
 set -eu
 
-# ── iOS location hack — keep iSH alive in background ─────
-# Requires iSH Location Services set to "Always" in iOS Settings
-# Must run before bore/sshd so iOS doesn't suspend the app first
-cat /dev/location > /dev/null &
-echo $! > /tmp/location.pid
+# ── iOS background persistence ────────────────────────────
+# location-drain + location-watchdog are wired into /etc/inittab
+# (sysinit) and all shell profiles — no action needed here.
+# Check status below in Step 4.
 
 SEC="/root/.pocket_lab_secure"
 WORK="/root/perplexity"
@@ -76,7 +75,7 @@ ssh_run() {
   fi
 }
 
-log "=== AUTO_START v2.9 $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+log "=== AUTO_START v3.0 $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
 # ══════════════════════════════════════════════════════════
 # STEP 1: Infrastructure (skip if already running)
@@ -154,7 +153,7 @@ MEM0_PID=$!
 import json
 a = {
   'approval_pubkey_sha256': '$NEW_PUB_SHA', 'approved': True,
-  'approved_at_utc': '$APPROVED_AT', 'approved_by': 'AUTO_START-v2.9',
+  'approved_at_utc': '$APPROVED_AT', 'approved_by': 'AUTO_START-v3.0',
   'expires_at_utc': '$EXPIRES_AT', 'nonce_sha256': 'PENDING',
   'pdf_sha256': '$PDF_SHA', 'repo': '$APPROVAL_REPO', 'run_id': '$RUN_ID',
   'schema': 'pocket_lab_signed_approval_v1',
@@ -257,7 +256,7 @@ log "[3/5] mem0 context..."
 if [ -f /tmp/mem0_context.txt ] && [ -s /tmp/mem0_context.txt ]; then
   echo ""
   echo "╔══════════════════════════════════════════════════════╗"
-  echo "║       POCKET LAB — AI CONTEXT (mem0 v2.9)           ║"
+  echo "║       POCKET LAB — AI CONTEXT (mem0 v3.0)           ║"
   echo "╚══════════════════════════════════════════════════════╝"
   cat /tmp/mem0_context.txt
   echo "══════════════════════════════════════════════════════"
@@ -277,7 +276,7 @@ log "Pre-signed approval ready: $PRESIGN_READY"
 log "[4/5] Lab status..."
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║              LAB STATUS (v2.9)                      ║"
+echo "║              LAB STATUS (v3.0)                      ║"
 echo "╚══════════════════════════════════════════════════════╝"
 
 TAMPER=$("$SEC/tamper-alert.sh" check 2>&1 || echo "TAMPER_UNKNOWN")
@@ -309,5 +308,6 @@ log "[5/5] mem0 boot save..."
 PAYLOAD="{\"tunnel\":\"$TUNNEL_STATUS\",\"host\":\"$BORE_HOST\",\"port\":\"$BORE_PORT\",\"sshd\":\"$SSHD_STATUS\",\"debian\":\"$DEBIAN\",\"vault\":\"$VAULT_STATUS\",\"presign\":\"$PRESIGN_READY\"}"
 mem0_save_event "BOOT" "$PAYLOAD" 2>/dev/null || true
 
-log "=== AUTO_START v2.9 complete ==="
+log "=== AUTO_START v3.0 complete ==="
+
 
