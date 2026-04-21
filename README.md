@@ -2,340 +2,283 @@
 
 GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab bundle.
 
+---
+
 ## What's new in v2.8
 
-- **Ruby fixed in Debian chroot** — iSH 4.20.69 does not support `FUTEX_WAIT_BITSET` (futex op 137), which kills glibc-linked ruby/git with SIGSYS (exit 159). Fixed by installing Alpine musl-linked ruby 2.7.8 wrappers at `/mnt/debian/usr/local/bin/ruby` and `/mnt/debian/usr/local/bin/git`
-- **LD_PRELOAD getcwd fix** — compiled `libgetcwd_fix.so` strips the `/mnt/debian` host prefix from `getcwd()` so Alpine git resolves paths correctly inside the chroot
+### Performance (2026-04-21)
+- **Open time: ≤15s** (was ~40-60s) — see [Performance](#performance--timing)
+- **SSH ControlMaster** — persistent channel opened at `AUTO_START` boot; all subsequent SSH calls pay ~50ms RTT instead of ~2s handshake
+- **Device pubkey deploy moved to `AUTO_START`** — startup manifest re-signed once at boot, not on every open; removes largest serial block from the hot path
+- **Gate 2 reads local file** — approval JSON passed inline via SSH heredoc; eliminates flaky GitHub raw propagation race and 1–5s GitHub fetch on every open
+- **Gate 1 sentinel** — `/tmp/.startup-verified-<boot_id>` set at boot; skipped on open if present
+- **GitHub publish async** — Contents API PUT fires in background after lab opens (no git clone in hot path)
+- **Single python3 invocation** — JSON build + sign + verify collapsed from 5 calls to 1
+- **`pocket_lab.sh`** — unified entrypoint: `open`, `lock`, `status`, `verify`, `tunnel up/down`, `mem0 sync/save`, `rotate-key`, `boot`
+- **`mem0.sh`** — shared library: structured JSON event saves, bulk query, rotation ledger
+
+### Security (2026-04-21)
+- **`schema/pins.json`** — single source of truth for `pdf_sha256`, `approval_pubkey_sha256`, TTL, key history
+- **`signature_algorithm` pinned** — Gate 2 now asserts `ECDSA-secp256k1-SHA256`; silent algorithm substitution blocked
+- **SSH key auth** — `PERPLEXITY_LOAD.sh` reads `SSH_KEY_PATH` from `/root/.bore_env`; hardcoded password removed from repo
+- **WireGuard-native tunnel** — `BORE_HOST`/`BORE_PORT`/`BORE_SECRET` sourced from `/root/.bore_env`; bore.pub is fallback only
+- **`EXPIRES_AT` bug fixed** — was `= now` (zero-second window); now `+5 min` (open) / `+30 min` (pre-sign)
+- **Approval key rotation ledger** — `pocket-lab-approvals/approvals/.rotation-history` append-only chain
+
+### Chroot / Toolchain (2026-04-20 → 2026-04-21)
+- **Ruby fixed in Debian chroot** — iSH 4.20.69 does not support `FUTEX_WAIT_BITSET` (futex op 137); fixed with Alpine musl-linked ruby 3.4.9 wrappers
+- **LD_PRELOAD getcwd fix** — `libgetcwd_fix.so` strips `/mnt/debian` host prefix from `getcwd()`
 - **Full git workflow** — `git init`, `git add`, `git commit`, `git log` all working inside `debian#` chroot
-- **gem list** fully functional — all default gems (benchmark, csv, date, openssl, etc.) available
-- **musl stdlib tree** installed at `/mnt/debian/usr/local/musl/` with all shared libs
+- **Homebrew compatibility patches** — 5 patches; `brew --version` works; `brew install hello` in progress
 
-## What's new in v2.7
+---
 
-- **Debian Bullseye i386 chroot** installed at `/mnt/debian` via Perplexity Computer automation
-- **gcc 10.2.1** and **curl 7.74.0** verified working inside chroot
-- **Entry script** `/root/debian.sh` — drops into `debian#` prompt
-- **Updated start-lab.sh hash** in manifest (auto-port-finding + watchdog)
-- **Tamper manifest re-signed** to match current `start-lab.sh`
-- **debian-ish-rootfs** GitHub release published with v1 + v2 tarballs
+## Quick start (iSH)
 
-## What's new in v2.6
+```sh
+# Unified entrypoint (v2.8)
+sh /root/perplexity/pocket_lab.sh open      # 3-gate open (≤15s)
+sh /root/perplexity/pocket_lab.sh status    # system status
+sh /root/perplexity/pocket_lab.sh lock      # wipe plaintext
+sh /root/perplexity/pocket_lab.sh tunnel up # start/check tunnel
+sh /root/perplexity/pocket_lab.sh mem0 sync # display AI context
+sh /root/perplexity/pocket_lab.sh help      # all commands
 
-- **Perplexity Computer live SSH connection** via bore.pub tunnel
-- **Fixed** `verify_pocket_lab_v2_4.sh` — correct signing key
-- **`OPEN_POCKET_LAB_V2_6.sh`** — three-gate opener
-- **`STATUS_V2_6.sh`** — unified status across all versions
-- **`verify_pocket_lab_v2_6.sh`** — full chain verifier
+# Boot sequence (run when iSH starts — warms everything for fast open)
+sh /root/perplexity/AUTO_START.sh
+
+# Direct openers (still available)
+sh /root/perplexity/OPEN_POCKET_LAB_V2_6.sh   # on-device 3-gate open
+sh /root/perplexity/PERPLEXITY_LOAD.sh        # Perplexity Computer fast open (≤15s)
+```
+
+---
+
+## Performance / Timing
+
+| Phase | v2.7 | v2.8 | Saving |
+|---|---:|---:|---:|
+| SSH handshakes (3×) | ~6s | ~0.15s (ControlMaster) | ~6s |
+| Device pubkey deploy | ~9s | 0s (done at boot) | ~9s |
+| GitHub fetch in Gate 2 | ~3s | 0s (local file) | ~3s |
+| git clone + push | ~7s | 0s (async API) | ~7s |
+| python3 cold-starts (5×) | ~2.5s | ~0.5s (1×) | ~2s |
+| Gate 1 (duplicate) | ~1.5s | 0s (sentinel) | ~1.5s |
+| **Total warm** | **~28s** | **~5s** | **~23s** |
+| **Total cold** | **~50s** | **~14s** | **~36s** |
+
+**Critical path (warm):** Step 1 nonce fetch (~1.5s) → Step 2 sign (~0.5s) → Step 3 SSH heredoc open (~3.5s) = **~5.5s**
+
+### What `AUTO_START.sh` pre-warms at boot (not user-visible)
+1. Starts bore tunnel + sshd (skipped if already running)
+2. Opens SSH ControlMaster persistent channel
+3. Generates secp256k1 keypair + pre-signs approval (30-min window)
+4. Fetches mem0 context → `/tmp/mem0_context.txt`
+5. Deploys new pubkey to device + re-signs startup manifest (only if pubkey changed)
+6. Sets `/tmp/.startup-verified-<boot_id>` sentinel on device
+
+---
 
 ## Security model
 
 - GitHub provides signed, short-lived approval artifacts. It does not store secrets.
 - The unlock secret remains inside iSH on-device only.
-- Every open command verifies secp256k1 signature + SHA-256 + bitcoin-style sha256d before unlocking.
-- Tamper lockout is enforced — any integrity failure blocks unlock.
+- Every open verifies secp256k1 signature + SHA-256 + bitcoin-style sha256d before unlocking.
+- Tamper lockout enforced — any integrity failure blocks unlock and alerts.
+- `schema/pins.json` is the single source of truth for all cryptographic pins.
 
-## Quick commands (in iSH)
+### Three-gate unlock chain
+
+| Gate | Check | Script |
+|---|---|---|
+| Gate 1 | Startup manifest integrity + tamper alert (skipped via boot sentinel) | `startup-verify.sh` + `tamper-alert.sh` |
+| Gate 2 | secp256k1 ECDSA signature + nonce + expiry + PDF hash + algorithm pin (local file, no GitHub fetch) | `pocket-lab-signed-approval.sh --local` |
+| Gate 3 | v2.4 PDF sha256 + v2.6 manifest signature + policy fields | `verify_pocket_lab_v2_6.sh` |
+
+### Approval schema (v1, signed)
+
+```json
+{
+  "schema": "pocket_lab_signed_approval_v1",
+  "approved": true,
+  "pdf_sha256": "<see pins.json>",
+  "nonce_sha256": "<sha256 of one-time nonce>",
+  "approved_by": "<actor>",
+  "approved_at_utc": "<ISO8601>",
+  "expires_at_utc": "<ISO8601, +5 min from open>",
+  "repo": "Tsukieomie/pocket-lab-approvals",
+  "run_id": "<run id>",
+  "approval_pubkey_sha256": "<sha256 of DER-encoded pubkey>",
+  "signature_algorithm": "ECDSA-secp256k1-SHA256"
+}
+```
+
+### Gate 2 signing paths
+
+| Path | When | How |
+|---|---|---|
+| **Path A** (preferred) | GitHub Actions runners available | Workflow dispatch → signed `approvals/current.json` pushed to `pocket-lab-approvals` |
+| **Path B** (fallback) | Runners unavailable or `PERPLEXITY_LOAD.sh` fast-open | Perplexity Computer generates keypair, signs locally, pushes async |
+
+Key rotations are logged in [`pocket-lab-approvals/approvals/.rotation-history`](https://github.com/Tsukieomie/pocket-lab-approvals/blob/main/approvals/.rotation-history).
+
+---
+
+## Configuration — `/root/.bore_env`
+
+All tunnel, SSH, and token config lives in `/root/.bore_env` (not committed to any repo).
 
 ```sh
-# Enter Debian chroot
-/root/debian.sh
-
-# Full three-gate open
-/root/perplexity/OPEN_POCKET_LAB_V2_6.sh
-
-# Unified status
-/root/perplexity/STATUS_V2_6.sh
-
-# Verify only
-/root/perplexity/verify_pocket_lab_v2_6.sh
-
-# Lock (remove plaintext)
-/root/.pocket_lab_secure/lock-pocket-lab.sh
-
-# Tunnel refresh
-/root/start-lab.sh
+# /root/.bore_env — set these on device
+BORE_HOST=<your-vps-ip-or-wireguard-ip>   # or bore.pub (fallback)
+BORE_PORT=2222                             # SSH tunnel port
+BORE_SECRET=<bore-shared-secret>           # if self-hosted bore
+SSH_KEY_PATH=/root/.ssh/pocket_lab_ed25519 # preferred over password
+SSH_PASS=<password>                        # legacy fallback only
+GH_TOKEN=<github-pat>                      # enables async Contents API publish
+MEM0_API_KEY=<mem0-api-key>               # in /root/.mem0_env (separate file)
 ```
 
-## Debian Chroot
+> **No passwords or tokens are committed to this repo.** All secrets live in `/root/.bore_env` and `/root/.mem0_env` on-device only.
+
+### WireGuard tunnel (recommended)
+
+Self-hosted bore over WireGuard VPS — faster, private, survives iOS backgrounding.
+Setup script: [`pocket-lab-approvals/setup-secure-tunnel.sh`](https://github.com/Tsukieomie/pocket-lab-approvals/blob/main/setup-secure-tunnel.sh)
+
+```
+iPhone WireGuard App ══WG Tunnel══▶ Oracle VPS ──bore──▶ :2222 (SSH to iSH)
+Perplexity Computer ──────────────────────────────────▶ VPS_IP:2222
+```
+
+---
+
+## Device-side patch (one-time, after pulling)
 
 ```sh
-/root/debian.sh # enter chroot (prompt: debian#)
-gcc --version # Debian 10.2.1
-curl --version # 7.74.0 with full SSL
-ruby --version # 3.4.9 [i586-linux-musl] via Alpine musl wrapper
-git --version # 2.32.7 via Alpine musl wrapper + getcwd fix
-gem list # 38+ default gems, bundler 2.6.9 (Ruby 3.4)
+# Adds --local mode to pocket-lab-signed-approval.sh
+# Required for Gate 2 inline verify in PERPLEXITY_LOAD.sh v2.8
+sh /root/perplexity/device-patches/apply-local-mode.sh
 ```
 
-Source: [debian-ish-rootfs](https://github.com/Tsukieomie/debian-ish-rootfs)
+---
 
-## Ruby / Git in chroot — Technical Notes
-
-### Root cause
-iSH kernel 4.20.69 does not implement `FUTEX_WAIT_BITSET` (futex operation 137).
-glibc's `libpthread` calls this at startup → all Debian ruby/git binaries crash with `SIGSYS` (exit 159).
-`mount --bind` also fails on iSH ("Bad address") so we cannot overlay `/proc`.
-
-### Fix
-1. Alpine's ruby/git are musl-linked — no pthreads dependency, run fine on iSH.
-2. Copied Alpine binaries + shared libs to `/mnt/debian/usr/local/musl/`.
-3. Created shell wrappers at `/mnt/debian/usr/local/bin/{ruby,gem,git}` that invoke the musl linker directly with correct `--library-path`.
-4. Compiled `libgetcwd_fix.so` (Alpine gcc) — LD_PRELOAD shim that strips the `/mnt/debian` host prefix from `getcwd()`, preventing Alpine git from resolving chroot-relative paths back to host paths.
-5. `/root/debian.sh` sets `PATH=/usr/local/bin:...` so wrappers are found first.
-
-### Key paths
-| Path | Purpose |
-|---|---|
-| `/mnt/debian/usr/local/bin/ruby` | musl ruby wrapper |
-| `/mnt/debian/usr/local/bin/gem` | musl gem wrapper |
-| `/mnt/debian/usr/local/bin/git` | musl git wrapper (with getcwd fix) |
-| `/mnt/debian/usr/local/musl/` | Alpine musl binaries + libs tree |
-| `/mnt/debian/usr/local/musl/lib/libgetcwd_fix.so` | getcwd LD_PRELOAD fix |
-| `/mnt/debian/usr/local/musl/usr/lib/ruby/2.7.0/` | Ruby stdlib |
-| `/mnt/debian/usr/local/musl/usr/lib/ruby/2.7.0/i586-linux-musl/` | Ruby C extensions (rbconfig, etc.) |
-| `/mnt/debian/dev/null` | Created with mknod (needed by git) |
-| `/mnt/debian/root/.gitconfig` | Pre-seeded git config (user + safe.directory=*) |
-
-### What still uses Debian binaries
-- `/bin/sh` (dash) — works fine, no pthreads
-- `gcc --version` — works (just `--version`, no compilation)
-- `curl` — works (fully SSL capable)
-- `apt-get` — still broken (glibc + pthreads)
-
-### Wrapper contents (reference)
-
-```sh
-# /mnt/debian/usr/local/bin/ruby
-#!/bin/sh
-export HOME=/root
-export RUBYLIB=/usr/local/musl/usr/lib/ruby/3.4.0:/usr/local/musl/usr/lib/ruby/3.4.0/i586-linux-musl
-export GEM_PATH=/usr/local/musl/usr/lib/gems:/usr/local/musl/usr/lib/ruby/gems/3.4.0
-export GEM_HOME=/usr/local/musl/usr/lib/gems
-export LD_PRELOAD=/usr/local/musl/lib/libgetcwd_fix.so
-exec /usr/local/musl/lib/ld-musl-i386.so.1 \
- --library-path /usr/local/musl/lib:/usr/local/musl/usr/lib \
- /usr/local/musl/bin/ruby "$@"
-
-# /mnt/debian/usr/local/bin/git
-#!/bin/sh
-export HOME=/root
-export LD_PRELOAD=/usr/local/musl/lib/libgetcwd_fix.so
-exec /usr/local/musl/lib/ld-musl-i386.so.1 \
- --library-path /usr/local/musl/lib:/usr/local/musl/usr/lib \
- /usr/local/musl/bin/git "$@"
-```
-
-## Perplexity SSH Connection
-
-```
-Host: bore.pub Port: dynamic (check /tmp/bore_port.txt) User: root Pass: SunTzu612
-```
-
-> **Port is auto-assigned by bore.pub** — not always 40188. Read `/tmp/bore_port.txt` on device for current port.
-> Tunnel drops when iSH backgrounds. Run `/root/start-lab.sh` in iSH to restore.
-> Perplexity Computer will scan nearby ports (40188–40191) if the stored port times out.
-
-## Artifact hashes (v2.4 bundle, still active vault)
+## Artifact hashes (v2.4 bundle — active vault)
 
 | File | SHA-256 |
 |---|---|
 | `pocket_security_lab_v2_4_integrated.pdf` | `38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134` |
 | `pocket_security_lab_v2_4.tar.enc` | `3201076f28cd6a6978586e18ce23c2c9851a73a0c6d357382fc44361758b9493` |
 
-## Ruby 3.4 Upgrade Notes
+Current approval pubkey fingerprint: see [`schema/pins.json`](schema/pins.json) — `approval_pubkey_sha256`.
 
-### Why musl 1.2.6 is needed
-Ruby 3.4 uses `statx()` and `qsort_r()` syscalls that were added to musl in 1.2.4. The iSH-pinned Alpine 3.14 ships musl 1.2.2 which lacks these. Solution: download `musl-1.2.6-r2.apk` from Alpine edge and place `ld-musl-1.2.6-i386.so.1` at `/mnt/debian/usr/local/musl/lib/`. Wrappers invoke this specific loader.
+---
 
-### base64 is no longer a default gem in Ruby 3.4
-Install via: `gem install base64` or download `ruby-base64-0.2.0-r1.apk` from Alpine edge.
+## mem0 integration
 
-### Key version bump
-| Component | Before | After |
-|---|---|---|
-| Ruby | 2.7.8 | 3.4.9 |
-| musl loader | 1.2.2 (host) | 1.2.6 (edge, in musl tree) |
-| RubyGems | 3.1.6 | 3.6.9 |
-| Bundler | 2.2.20 | 2.6.9 |
+`AUTO_START.sh` reads and writes operational context to mem0 (`agent_id=pocket-lab`).
 
-## Homebrew Installation (v2.9 — In Progress)
-
-### Status
-Homebrew is cloned and `brew --version` responds. Two active blockers being resolved:
-1. `/dev/fd/63` — bash process substitution fails (iSH lacks `/proc/self/fd` inside chroot)
-2. `HOMEBREW_GIT_PATH` — brew uses Debian git (`/usr/bin/git`, SIGSYS), needs Alpine git wrapper
-3. Root check in `brew.sh` — needs patch or non-root user
-
-### What's installed
-- Homebrew cloned to `/home/linuxbrew/.linuxbrew/Homebrew/` via Alpine git
-- `brew` symlink at `/home/linuxbrew/.linuxbrew/bin/brew`
-- All prefix dirs created: `Cellar`, `bin`, `etc`, `include`, `lib`, `sbin`, `share`, `var`, `opt`
-
-### Install method
 ```sh
-# Step 1: Clone Homebrew using Alpine git (from iSH host, outside chroot)
-HOME=/mnt/debian/root \
-GIT_CONFIG_GLOBAL=/mnt/debian/root/.gitconfig \
-git clone --depth=1 https://github.com/Homebrew/brew.git \
- /mnt/debian/home/linuxbrew/.linuxbrew/Homebrew
+# Session context loaded at boot into /tmp/mem0_context.txt
+# Categories: bypass / keys / issues / infra / ai
 
-# Step 2: Create brew symlink
-ln -sf ../Homebrew/bin/brew /mnt/debian/home/linuxbrew/.linuxbrew/bin/brew
-
-# Step 3: Enter chroot and run brew
-chroot /mnt/debian /bin/bash -c "
- export PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
- export HOME=/root
- export HOMEBREW_NO_ANALYTICS=1
- export HOMEBREW_NO_ENV_HINTS=1
- export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
- export HOMEBREW_GIT_PATH=/usr/local/bin/git # Alpine musl git wrapper
- brew --version
-"
+# Manual sync
+sh /root/perplexity/pocket_lab.sh mem0 sync   # query + display
+sh /root/perplexity/pocket_lab.sh mem0 save   # save current state snapshot
 ```
 
-### Patches applied to install.sh
-- `UNAME_MACHINE` forced to `x86_64` (Homebrew rejects i686)
-- Architecture abort replaced with warning
-- Root abort replaced with warning
-- Process substitution `< <(...)` replaced with `<<< "$(...)"` (bash herestring)
+Config: `MEM0_API_KEY` in `/root/.mem0_env`.
 
-### Next steps
-- Patch `brew.sh` process substitution at line 754 (git version check)
-- Patch `brew.sh` root check at line 256
-- Set `HOMEBREW_GIT_PATH=/usr/local/bin/git` (our Alpine musl git wrapper)
-- Add `/usr/local/bin` to brew's `PATH` so it finds the musl wrappers
-- Test `brew install hello` (simplest formula, builds from source)
+---
 
-### Key env vars for brew inside chroot
+## Debian chroot
+
 ```sh
-export HOMEBREW_NO_ANALYTICS=1
-export HOMEBREW_NO_ENV_HINTS=1
-export HOMEBREW_NO_INSTALL_CLEANUP=1
-export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
-export HOMEBREW_CELLAR=/home/linuxbrew/.linuxbrew/Cellar
-export HOMEBREW_REPOSITORY=/home/linuxbrew/.linuxbrew/Homebrew
-export HOMEBREW_GIT_PATH=/usr/local/bin/git
-export HOMEBREW_RUBY_PATH=/usr/local/bin/ruby
+/root/debian.sh         # enter chroot (prompt: debian#)
+gcc --version           # Debian 10.2.1
+curl --version          # 7.74.0 with SSL
+ruby --version          # 3.4.9 [i586-linux-musl] via Alpine musl wrapper
+git --version           # 2.32.7 via musl wrapper + getcwd fix
+gem list                # 38+ default gems
 ```
 
-## Perplexity Computer Direct Signing (Gate 2 Bypass)
+Source: [debian-ish-rootfs](https://github.com/Tsukieomie/debian-ish-rootfs)
 
-When GitHub Actions runners are unavailable (free-tier minutes exhausted, `startup_failure`),
-Perplexity Computer can act as the approval signer directly:
+### Root cause + fix
 
-1. PC generates a fresh secp256k1 keypair
-2. Signs the approval JSON with the new private key
-3. Pushes `approvals/current.json` + `.sig` + new `keys/pocket_lab_github_approval_secp256k1.pub` to `pocket-lab-approvals`
-4. Updates `pocket_lab_github_approval_secp256k1.pub` on device via SSH
-5. Updates `EXPECTED_PUB_SHA` in `pocket-lab-signed-approval.sh` on device
-6. Re-signs `startup-integrity.manifest` to reflect the changed files
-7. Runs `OPEN_POCKET_LAB_V2_6.sh` — all three gates pass
+iSH kernel 4.20.69 does not implement `FUTEX_WAIT_BITSET` (futex op 137). glibc's `libpthread` calls this at startup — all Debian ruby/git binaries crash with `SIGSYS` (exit 159).
 
-The `APPROVAL_SIGNING_KEY_SECP256K1_B64` secret in both repos is kept in sync
-with the active private key so GitHub Actions path also works once runners are restored.
+**Fix:** Alpine musl-linked binaries + libs copied to `/mnt/debian/usr/local/musl/`. Shell wrappers at `/mnt/debian/usr/local/bin/{ruby,gem,git}` invoke the musl linker directly. `libgetcwd_fix.so` (LD_PRELOAD) strips the `/mnt/debian` host prefix from `getcwd()`.
 
-**Current approval pubkey fingerprint:**
-`76f19dd5be0f476ac957c29de9f46c39b81f109efa0ff3fbdde0e0d567904cf4`
-(Updated 2026-04-20)
-
-## Known Issues Fixed (2026-04-20) — Session 1
-
-| Issue | Fix |
+| Path | Purpose |
 |---|---|
-| `start-lab.sh` hash stale in startup manifest | Re-signed manifest with new hash |
-| `pocket_security_lab_v2_6.manifest` empty | Populated with hardened policy JSON + re-signed |
-| `pocket_security_lab_v2_4.manifest.sig` invalid | Re-signed with `ish_startup_signing_secp256k1.key` |
-| `pocket_security_lab_v2_3.manifest.sig` invalid | Re-signed with `pocket_lab_secp256k1.key` |
-| GitHub Actions `startup_failure` blocking Gate 2 | Perplexity Computer direct signing path |
+| `/mnt/debian/usr/local/bin/ruby` | musl ruby wrapper |
+| `/mnt/debian/usr/local/bin/git` | musl git wrapper (with getcwd fix) |
+| `/mnt/debian/usr/local/musl/lib/libgetcwd_fix.so` | getcwd LD_PRELOAD shim |
+| `/mnt/debian/usr/local/musl/` | Alpine musl binaries + libs tree |
 
-## Known Issues Fixed (2026-04-20) — Session 2 (PERPLEXITY_LOAD v2.7)
+---
 
-| Issue | Root Cause | Fix |
-|---|---|---|
-| `BORE_PORT` hardcoded as 40188 in `PERPLEXITY_LOAD.sh` | bore.pub auto-assigns ports; 40188 was taken or shifted | Port discovered dynamically — PC scans 40188–40191 for live SSH banner |
-| `expires_at_utc` set equal to `approved_at_utc` | Approval JSON built with same timestamp for both fields | `expires_at_utc` now set 30 minutes ahead of `approved_at_utc`; gate no longer throws `APPROVAL_EXPIRED` |
-| `APPROVAL_EXPIRED` on Gate 2 check | See above — zero-second validity window | Fixed in approval builder; verified `SIGNED_GITHUB_APPROVAL_OK` on first attempt after fix |
-| Tunnel offline at session open time | iSH was backgrounded; bore process dead | Standard recovery: user ran `/root/start-lab.sh`; PC then port-scanned to find active port |
-| PC approval pushed with `nonce_sha256: PENDING` on first pass | Nonce fetch requires live SSH; tunnel was down when approval was first built | Rebuilt approval with live nonce after tunnel came back; all three gates passed cleanly |
-| `sshpass` not available in PC sandbox | PC sandbox is minimal Debian — no `sshpass` pre-installed | Switched to `paramiko` (Python SSH library) for all device communication; no `sshpass` dependency |
+## Homebrew on iSH
 
-## PERPLEXITY_LOAD v2.7 — Full Open Sequence (Verified 2026-04-20)
-
-All five steps completed successfully this session:
-
-| Step | Action | Result |
-|---|---|---|
-| 1+2 (parallel) | mem0 context query + secp256k1 keypair generation | Keypair: `76f19dd5be0f47...` |
-| 3 | Fetch live nonce from device, build + sign approval JSON | Nonce: `ff57a4b1b12215...`, `Verified OK` |
-| 4 (parallel) | Push to `pocket-lab-approvals` + update device pubkey + re-sign manifest | Git: OK, Device: `STARTUP_VERIFY_OK` + `DEVICE_UPDATED_OK` |
-| 5 | `OPEN_POCKET_LAB_V2_6.sh` — all three gates | Gate 1: Gate 2: Gate 3: Vault: `UNLOCKED_OK` |
-
-**Vault unlocked:** `/tmp/pocket_security_lab_v2_3_unlocked/pocket_security_lab_v2_3.pdf`
-
-## Homebrew on iSH — Compatibility Patches
-
-Homebrew is installed at `/mnt/debian/home/linuxbrew/.linuxbrew/` (Debian chroot).
-Five compatibility patches are required to make it work on iSH kernel 4.20.69.
-
-### Quick Re-Apply
+`brew --version` works. `brew install hello` in progress.
 
 ```sh
-# After any brew update or fresh Homebrew clone:
-sh /root/perplexity/brew_apply_patches.sh
-
-# Test:
-sh /root/perplexity/brew_test_hello.sh
+sh /root/perplexity/brew_apply_patches.sh   # re-apply after brew update
+sh /root/perplexity/brew_test_hello.sh      # test
 ```
 
-### What Gets Patched
+5 patches required — see [`homebrew-patches/`](homebrew-patches/).
 
-| File | Problem | Fix Applied |
-|---|---|---|
-| `standalone/init.rb` | Requires Ruby 4.0; we have musl 3.4.9 | Override required version to 3.x when ≥ 4 |
-| `vendor/bundle/ruby/3.4.0` | sorbet-runtime gem not found by Ruby 3.x | Symlink `3.4.0 → 4.0.0` |
-| `shims/shared/curl|svn|git` | `bash -p` causes `getcwd()` failure in chroot | Remove `-p` flag from all shim shebangs |
-| `shims/utils.sh` | `< <(type -aP)` needs `/dev/fd` (unavailable on iSH) | Replace with `<<< "$(type -aP ...)"` |
-| `/usr/local/bin/curl` (chroot) | glibc curl hits unsupported iSH syscalls | musl curl wrapper via `ld-musl-1.2.6-i386.so.1` |
+| Problem | Fix |
+|---|---|
+| `RuntimeError: must be run under Ruby 4.0` | Patch `standalone/init.rb` to accept ≥ 3.x |
+| `cannot load such file -- sorbet-runtime` | Symlink `ruby/3.4.0 → 4.0.0` |
+| `getcwd() failed` in shims | Remove `-p` from shim shebangs |
+| `/dev/fd/63: No such file` | Replace `< <(cmd)` with `<<< "$(cmd)"` |
+| `curl SIGSYS` | musl curl wrapper via `ld-musl-1.2.6-i386.so.1` |
 
-Full documentation and individual patch files: [`homebrew-patches/`](homebrew-patches/)
+---
 
-### Required Brew Env Vars
+## iSH-AOK — Recommended upgrade
 
-```sh
-export GEM_PATH=/home/linuxbrew/.linuxbrew/Homebrew/Library/Homebrew/vendor/bundle/ruby/3.4.0
-export BUNDLE_PATH=/home/linuxbrew/.linuxbrew/Homebrew/Library/Homebrew/vendor/bundle
-export HOMEBREW_CURL=/usr/local/bin/curl
-export HOMEBREW_FORCE_BREWED_CURL=1
-# + standard HOMEBREW_PREFIX, CELLAR, REPOSITORY, GIT_PATH, RUBY_PATH, DEVELOPER vars
-# Always: cd / before calling chroot (avoids bad getcwd from inherited CWD)
-```
-
-
-## iSH-AOK — Recommended Upgrade
-
-iSH-AOK ([github.com/emkey1/ish-AOK](https://github.com/emkey1/ish-AOK)) is the recommended
-replacement for stock iSH. It is a maintained fork with direct benefits for this lab:
+[iSH-AOK](https://github.com/emkey1/ish-AOK) is a maintained iSH fork with direct benefits for this lab.
 
 | Benefit | Detail |
 |---|---|
-| `/dev/rtc` | Unblocks Debian 11 / Devuan init — required for `apt` of glibc packages |
-| `clock_nanosleep_time64` | Fixes `sleep` in Debian chroot — unblocks `libc6` install |
-| `/proc/ish/host_info` | Hardware model + OS version readable from inside the shell |
-| `/proc/ish/BAT0` + sysfs | Battery level and charge status |
-| `/proc/ish/UIDevice` | Device orientation + low power mode |
-| vim/vi `^Z` fix | No more hangs on suspend or exit |
-| 10-15% perf improvement | Rewritten internal locking — benefits bore tunnel + SSH throughput |
-| amd64 port (planned) | Will eliminate all musl wrapper hacks and i386 Homebrew patches |
+| `/dev/rtc` | Unblocks Debian 11 init / `apt` of glibc packages |
+| `clock_nanosleep_time64` | Fixes `sleep` in Debian chroot |
+| 10–15% performance | Benefits bore tunnel + SSH throughput |
+| amd64 port (planned) | Eliminates all musl wrapper hacks + i386 Homebrew patches |
 
-**Install:** TestFlight beta at [testflight.apple.com/join/X1flyiqE](https://testflight.apple.com/join/X1flyiqE)
+**Install:** [testflight.apple.com/join/X1flyiqE](https://testflight.apple.com/join/X1flyiqE)
+**Guide:** [ISH_AOK_UPGRADE.md](ISH_AOK_UPGRADE.md)
 
-**Full migration guide:** [ISH_AOK_UPGRADE.md](ISH_AOK_UPGRADE.md)
+No changes to `AUTO_START.sh` or `PERPLEXITY_LOAD.sh` needed after switching.
 
-No changes needed to `start-lab.sh`, `AUTO_START.sh`, or `PERPLEXITY_LOAD.sh` after switching.
+---
 
-### Status (2026-04-20)
+## Version history
 
-- `brew --version` confirmed working
-- `brew install hello` in progress (tunnel dropped mid-install — patches applied on device)
-- **Note (2026-04-20):** Tunnel was down at session start; patches confirmed still applied on device after tunnel restore
+| Version | Key changes |
+|---|---|
+| **v2.8** | ≤15s open, ControlMaster, async GitHub publish, Gate 2 local, pins.json, mem0.sh, pocket_lab.sh, SSH key auth, EXPIRES_AT fix |
+| **v2.7** | AUTO_START pre-sign, single mem0 batch fetch, delta-only saves, parallel keypair+mem0 |
+| **v2.6** | Perplexity Computer SSH, secp256k1 signed approvals, three-gate opener, verify_v2_6 |
+| **v2.5** | GitHub-gated approvals (unsigned JSON), iSH nonce+fetch+verify flow |
+| **v2.4** | Encrypted bundle (tar.enc), PDF+manifest+sig, tamper lockout |
+| **v2.3** | Base encrypted vault |
+
+---
+
+## Known issues fixed
+
+| Session | Issue | Fix |
+|---|---|---|
+| 2026-04-21 | `EXPIRES_AT` = `now` (zero-second TTL) | Fixed to `+5m` open / `+30m` pre-sign |
+| 2026-04-21 | `SSH_PASS` hardcoded in repo | Removed; sourced from `/root/.bore_env` |
+| 2026-04-21 | Three conflicting pubkey fingerprints | Consolidated in `schema/pins.json` |
+| 2026-04-21 | bore.pub hardcoded in scripts | Scripts source `/root/.bore_env`; bore.pub is fallback |
+| 2026-04-20 | `startup_failure` on GitHub Actions | Perplexity Computer direct signing (Path B) |
+| 2026-04-20 | `BORE_PORT` hardcoded | Dynamic port discovery 40188–40191 |
+| 2026-04-20 | `APPROVAL_EXPIRED` on Gate 2 | EXPIRES_AT set 30 min ahead (now fixed to +5m proper) |
