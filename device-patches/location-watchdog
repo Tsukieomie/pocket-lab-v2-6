@@ -1,0 +1,10 @@
+#!/bin/sh
+# Location drain watchdog — respawns drain if it dies
+# Checks every 5 seconds
+while true; do
+    if ! busybox ps | grep -v grep | grep -q location-drain; then
+        /usr/local/bin/location-drain &
+        echo $! > /tmp/location.pid
+    fi
+    sleep 5
+done
