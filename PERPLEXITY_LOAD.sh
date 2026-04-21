@@ -10,9 +10,21 @@
 #   - Single git push replaces per-file operations
 # ============================================================
 
-BORE_HOST="bore.pub"
-BORE_PORT="40188"
-SSH_PASS="SunTzu612"
+# ── Tunnel config — sourced from .bore_env if present (WireGuard VPS), else bore.pub fallback ──
+_BORE_ENV="/root/.bore_env"
+if [ -f "$_BORE_ENV" ]; then
+  # shellcheck disable=SC1090
+  BORE_HOST=$(grep '^BORE_HOST=' "$_BORE_ENV" | cut -d= -f2)
+  BORE_PORT=$(grep '^BORE_PORT=' "$_BORE_ENV" | cut -d= -f2)
+  SSH_KEY_PATH=$(grep '^SSH_KEY_PATH=' "$_BORE_ENV" | cut -d= -f2 || echo "")
+else
+  BORE_HOST="bore.pub"
+  BORE_PORT="40188"
+  SSH_KEY_PATH=""
+fi
+# SSH_PASS removed — use key-based auth. Set SSH_KEY_PATH in /root/.bore_env.
+# Legacy: if no key is configured, fall back to sshpass (not recommended).
+SSH_PASS_LEGACY=$(grep '^SSH_PASS=' "$_BORE_ENV" 2>/dev/null | cut -d= -f2 || echo "")
 PDF_SHA="38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134"
 APPROVAL_REPO="Tsukieomie/pocket-lab-approvals"
 APPROVAL_CURVE="secp256k1"
@@ -21,15 +33,26 @@ PRESIGN_PUB="/tmp/presign_approval.pub"
 PRESIGN_PUB_SHA_FILE="/tmp/presign_pub_sha.txt"
 
 ssh_run() {
-  sshpass -p "$SSH_PASS" ssh \
-    -o StrictHostKeyChecking=no \
-    -o ConnectTimeout=20 \
-    -p "$BORE_PORT" \
-    root@"$BORE_HOST" "$@" 2>&1
+  if [ -n "$SSH_KEY_PATH" ] && [ -f "$SSH_KEY_PATH" ]; then
+    ssh -i "$SSH_KEY_PATH" \
+      -o StrictHostKeyChecking=no \
+      -o ConnectTimeout=20 \
+      -p "$BORE_PORT" \
+      root@"$BORE_HOST" "$@" 2>&1
+  elif [ -n "$SSH_PASS_LEGACY" ]; then
+    # Legacy password fallback — rotate to key auth via: ssh-keygen + ssh-copy-id
+    sshpass -p "$SSH_PASS_LEGACY" ssh \
+      -o StrictHostKeyChecking=no \
+      -o ConnectTimeout=20 \
+      -p "$BORE_PORT" \
+      root@"$BORE_HOST" "$@" 2>&1
+  else
+    echo "SSH_CONFIG_MISSING: set SSH_KEY_PATH or SSH_PASS in /root/.bore_env" >&2; return 2
+  fi
 }
 
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║     PERPLEXITY LOAD v2.7 — POCKET LAB FAST OPEN    ║"
+echo "║     PERPLEXITY LOAD v2.8 — POCKET LAB FAST OPEN    ║"
 echo "╚══════════════════════════════════════════════════════╝"
 
 # ── STEP 1 + 2: Parallel — mem0 query & keypair generation ─
@@ -74,8 +97,8 @@ NONCE_SHA=$(printf '%s' "$NONCE" | openssl dgst -sha256 -r | awk '{print $1}')
 echo "   Nonce: $NONCE"
 
 APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-EXPIRES_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)  # gate checks nonce freshness
-RUN_ID="perplexity-v27-$(date +%s)"
+EXPIRES_AT=$(date -u -d '+5 minutes' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+5M +%Y-%m-%dT%H:%M:%SZ)  # 5-min TTL matches approval policy
+RUN_ID="perplexity-v28-$(date +%s)"
 
 python3 -c "
 import json
@@ -95,8 +118,18 @@ a = {
 open('/tmp/current.json','w').write(json.dumps(a,sort_keys=True,separators=(',',':'))+'\n')
 "
 openssl dgst -sha256 -sign "$PRESIGN_KEY" -out /tmp/current.json.sig /tmp/current.json
+# Verify signature and pin signature_algorithm field
 openssl dgst -sha256 -verify "$PRESIGN_PUB" \
   -signature /tmp/current.json.sig /tmp/current.json >/dev/null
+python3 -c "
+import json, sys
+a = json.load(open('/tmp/current.json'))
+assert a.get('signature_algorithm') == 'ECDSA-secp256k1-SHA256', \
+  'APPROVAL_ALGORITHM_MISMATCH: expected ECDSA-secp256k1-SHA256 got ' + str(a.get('signature_algorithm'))
+assert a.get('schema') == 'pocket_lab_signed_approval_v1', \
+  'APPROVAL_SCHEMA_MISMATCH: ' + str(a.get('schema'))
+print('   Algorithm pin: OK (' + a['signature_algorithm'] + ')')
+"
 echo "   Approval signed and verified."
 
 # ── STEP 4: Push to repo + update device (parallel) ────────

@@ -95,10 +95,19 @@ else
   sleep 1
   if pgrep -f "bore local 2222" >/dev/null 2>&1; then
     TUNNEL_STATUS="UP"
-    log "Tunnel: RUNNING bore.pub:40188"
+    log "Tunnel: RUNNING ($(cat /tmp/bore_host.txt 2>/dev/null || echo bore.pub):$(cat /tmp/bore_port.txt 2>/dev/null || echo 40188))"
   else
-    /usr/local/bin/bore local 2222 --to bore.pub --port 40188 \
-      >/tmp/bore-40188.log 2>&1 &
+    # Source WireGuard bore config if present, fall back to bore.pub
+    BORE_DEST_HOST="$(cat /root/.bore_env 2>/dev/null | grep '^BORE_HOST=' | cut -d= -f2 || echo bore.pub)"
+    BORE_DEST_PORT="$(cat /root/.bore_env 2>/dev/null | grep '^BORE_PORT=' | cut -d= -f2 || echo 40188)"
+    BORE_SECRET_ARG=""
+    _BORE_SECRET="$(cat /root/.bore_env 2>/dev/null | grep '^BORE_SECRET=' | cut -d= -f2 || echo '')"
+    [ -n "$_BORE_SECRET" ] && BORE_SECRET_ARG="--secret $_BORE_SECRET"
+    echo "$BORE_DEST_HOST" > /tmp/bore_host.txt
+    echo "$BORE_DEST_PORT" > /tmp/bore_port.txt
+    # shellcheck disable=SC2086
+    /usr/local/bin/bore local 2222 --to "$BORE_DEST_HOST" --port "$BORE_DEST_PORT" $BORE_SECRET_ARG \
+      >/tmp/bore-tunnel.log 2>&1 &
     sleep 2
     pgrep -f "bore local 2222" >/dev/null 2>&1 && TUNNEL_STATUS="UP"
     log "Tunnel: $TUNNEL_STATUS"
@@ -125,7 +134,7 @@ log "[2/4] Pre-signing approval in background..."
   APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   # Expiry: 60 min window (generous — Perplexity will re-nonce if needed)
   # EXPIRES_AT is set loosely; gate script validates nonce freshness separately
-  EXPIRES_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)  # placeholder; updated at open time
+  EXPIRES_AT=$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)  # 30-min window; matches documented intent
   RUN_ID="auto-presign-$(date +%s)"
   PDF_SHA="38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134"
 
@@ -191,7 +200,7 @@ DEBIAN="NOT MOUNTED"
 [ -f /mnt/debian/bin/sh ] && DEBIAN="MOUNTED (/mnt/debian)"
 echo " Debian:      $DEBIAN"
 
-BORE_PORT=$(cat /tmp/bore_port.txt 2>/dev/null || echo "40188"); echo " Tunnel:      bore.pub:$BORE_PORT [$TUNNEL_STATUS]"
+BORE_HOST=$(cat /tmp/bore_host.txt 2>/dev/null || echo "bore.pub"); BORE_PORT=$(cat /tmp/bore_port.txt 2>/dev/null || echo "40188"); echo " Tunnel:      $BORE_HOST:$BORE_PORT [$TUNNEL_STATUS]"
 echo " SSHD:        [$SSHD_STATUS]"
 echo " Pre-signed:  [$PRESIGN_READY] → /tmp/presign_approval.*"
 echo "══════════════════════════════════════════════════════"
@@ -202,7 +211,7 @@ echo " (Pre-signed key is ready — open will be faster)"
 echo "══════════════════════════════════════════════════════"
 
 # Save boot event (delta-only)
-BORE_PORT=$(cat /tmp/bore_port.txt 2>/dev/null || echo "?"); BOOT_MSG="AUTO_START v2.7 ran at $(date -u +%Y-%m-%dT%H:%M:%SZ). Tunnel:$TUNNEL_STATUS Port:$BORE_PORT SSHD:$SSHD_STATUS Debian:$DEBIAN Vault:$VAULT_STATUS PreSign:$PRESIGN_READY"
+BORE_HOST=$(cat /tmp/bore_host.txt 2>/dev/null || echo "?"); BORE_PORT=$(cat /tmp/bore_port.txt 2>/dev/null || echo "?"); BOOT_MSG="AUTO_START v2.8 ran at $(date -u +%Y-%m-%dT%H:%M:%SZ). Tunnel:$TUNNEL_STATUS Host:$BORE_HOST Port:$BORE_PORT SSHD:$SSHD_STATUS Debian:$DEBIAN Vault:$VAULT_STATUS PreSign:$PRESIGN_READY"
 mem0_save "$BOOT_MSG"
 
-log "=== AUTO_START v2.7 complete ==="
+log "=== AUTO_START v2.8 complete ==="
