@@ -1,0 +1,8 @@
+#!/bin/sh
+# Self-healing location drain — respawns itself if killed
+# Installed by: pocket-lab-v2-6 / ISH_AOK_INJECT
+# Hooks: /etc/inittab (sysinit), /etc/profile, /etc/profile.d/, /root/.profile, /root/.ashrc
+while true; do
+    cat /dev/location > /dev/null 2>&1
+    sleep 1
+done
