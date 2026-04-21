@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================
-# AUTO_START.sh — Pocket Security Lab Unified Startup (v3.0)
+# AUTO_START.sh — Pocket Security Lab Unified Startup (v3.1)
 #
 # PERF IMPROVEMENTS over v2.7:
 #   - Opens persistent SSH ControlMaster channel at boot
@@ -75,7 +75,7 @@ ssh_run() {
   fi
 }
 
-log "=== AUTO_START v3.0 $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+log "=== AUTO_START v3.1 $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
 # ══════════════════════════════════════════════════════════
 # STEP 1: Infrastructure (skip if already running)
@@ -106,11 +106,24 @@ else
   fi
 fi
 
-if pgrep -f "sshd: /usr" >/dev/null 2>&1; then
+# Check for dropbear OR openssh (iSH uses dropbear)
+_sshd_running() {
+  busybox ps 2>/dev/null | grep -v grep | grep -qE '(dropbear|sshd)' && return 0
+  busybox netstat -tlnp 2>/dev/null | grep -qE ':22 |:2222 ' && return 0
+  return 1
+}
+if _sshd_running; then
   SSHD_STATUS="UP"; log "SSHD: already RUNNING — skip"
 else
-  /usr/sbin/sshd 2>/dev/null || true
-  pgrep -f "sshd: /usr" >/dev/null 2>&1 && SSHD_STATUS="UP"
+  # Try dropbear first (iSH compatible), fall back to openssh
+  if command -v dropbear >/dev/null 2>&1; then
+    dropbear -F -p 2222 2>/tmp/dropbear.log &
+    sleep 2
+  else
+    /usr/sbin/sshd -D 2>/dev/null &
+    sleep 2
+  fi
+  _sshd_running && SSHD_STATUS="UP"
   log "SSHD: $SSHD_STATUS"
 fi
 
@@ -145,7 +158,7 @@ MEM0_PID=$!
 
   APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   EXPIRES_AT=$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-              || date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)
+              || awk 'BEGIN{t=systime()+1800; print strftime("%Y-%m-%dT%H:%M:%SZ",t)}')
   RUN_ID="auto-presign-$(date +%s)"
 
   # Single python3 invocation for JSON build
@@ -276,7 +289,7 @@ log "Pre-signed approval ready: $PRESIGN_READY"
 log "[4/5] Lab status..."
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║              LAB STATUS (v3.0)                      ║"
+echo "║              LAB STATUS (v3.1)                      ║"
 echo "╚══════════════════════════════════════════════════════╝"
 
 TAMPER=$("$SEC/tamper-alert.sh" check 2>&1 || echo "TAMPER_UNKNOWN")
@@ -291,6 +304,11 @@ DEBIAN="NOT MOUNTED"
 [ -f /mnt/debian/bin/sh ] && DEBIAN="MOUNTED (/mnt/debian)"
 echo " Debian:      $DEBIAN"
 
+DRAIN_STATUS="DOWN"
+busybox ps 2>/dev/null | grep -v grep | grep -q 'location-drain' && DRAIN_STATUS="UP"
+WATCH_STATUS="DOWN"
+busybox ps 2>/dev/null | grep -v grep | grep -q 'location-watchdog' && WATCH_STATUS="UP"
+echo " Drain:       [$DRAIN_STATUS]  Watchdog: [$WATCH_STATUS]"
 echo " Tunnel:      $BORE_HOST:$BORE_PORT [$TUNNEL_STATUS]"
 echo " SSHD:        [$SSHD_STATUS]"
 echo " Pre-signed:  [$PRESIGN_READY]"
