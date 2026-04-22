@@ -97,11 +97,22 @@ else
   else
     BORE_SECRET_ARG=""
     [ -n "$BORE_SECRET" ] && BORE_SECRET_ARG="--secret $BORE_SECRET"
+    PORT_ARG=""
+    # Fly.io assigns port dynamically — skip --port flag
+    [ -n "$BORE_PORT" ] && [ "$BORE_HOST" != "137.66.7.242" ] && PORT_ARG="--port $BORE_PORT"
     # shellcheck disable=SC2086
-    /usr/local/bin/bore local 2222 --to "$BORE_HOST" --port "$BORE_PORT" $BORE_SECRET_ARG \
+    /usr/local/bin/bore local 2222 --to "$BORE_HOST" $PORT_ARG $BORE_SECRET_ARG \
       >/tmp/bore-tunnel.log 2>&1 &
     sleep 2
     pgrep -f "bore local 2222" >/dev/null 2>&1 && TUNNEL_STATUS="UP"
+    # Sync dynamic port back to .bore_env
+    LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/bore-tunnel.log 2>/dev/null | grep -o 'remote_port=[0-9]*' | tail -1 | cut -d= -f2)
+    if [ -n "$LIVE_PORT" ] && [ "$LIVE_PORT" != "$BORE_PORT" ]; then
+      grep -v 'BORE_PORT' "$BORE_ENV" > /tmp/.be && mv /tmp/.be "$BORE_ENV"
+      echo "BORE_PORT=$LIVE_PORT" >> "$BORE_ENV"
+      BORE_PORT="$LIVE_PORT"
+      log "Tunnel port synced: $LIVE_PORT"
+    fi
     log "Tunnel: $TUNNEL_STATUS"
   fi
 fi
