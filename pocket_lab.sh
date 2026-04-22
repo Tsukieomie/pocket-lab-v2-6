@@ -92,8 +92,11 @@ case "$CMD" in
           BORE_SECRET=$(grep '^BORE_SECRET=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo "")
           SECRET_ARG=""
           [ -n "$BORE_SECRET" ] && SECRET_ARG="--secret $BORE_SECRET"
+          PORT_ARG=""
+          # Only pass --port if not using Fly.io (Fly assigns port dynamically)
+          [ -n "$BORE_PORT" ] && [ "$BORE_HOST" != "137.66.7.242" ] && PORT_ARG="--port $BORE_PORT"
           # shellcheck disable=SC2086
-          /usr/local/bin/bore local 2222 --to "$BORE_HOST" --port "$BORE_PORT" $SECRET_ARG \
+          /usr/local/bin/bore local 2222 --to "$BORE_HOST" $PORT_ARG $SECRET_ARG \
             >/tmp/bore-tunnel.log 2>&1 &
           sleep 2
           pgrep -f "bore local 2222" >/dev/null 2>&1 \
