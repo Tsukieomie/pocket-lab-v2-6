@@ -1,0 +1,13 @@
+1260a1261,1272
+>         this._settingsAllMenuItem = new Gtk.MenuItem({label: _('Settings')});
+>         this._settingsAllMenuItem.connect('activate', () => {
+>             const context = Gdk.Display.get_default().get_app_launch_context();
+>             context.set_timestamp(Gtk.get_current_event_time());
+>             try {
+>                 const desktopFile = GioUnix.DesktopAppInfo.new('gnome-control-center.desktop');
+>                 desktopFile.launch([], context);
+>             } catch(e) {
+>                 DesktopIconsUtil.trySpawn(null, ['gnome-control-center'], DesktopIconsUtil.getFilteredEnviron());
+>             }
+>         });
+>         this._menu.add(this._settingsAllMenuItem);

@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply Ryzen 7 4700U TDP/Power Limits via ryzenadj
+After=sysinit.target
+ConditionPathExists=/usr/local/bin/apply-tdp.sh
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/apply-tdp.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Power Profiles Daemon Shim (performance + balanced + power-saver)
+After=dbus.service
+Conflicts=power-profiles-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/libexec/ppd-shim.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
