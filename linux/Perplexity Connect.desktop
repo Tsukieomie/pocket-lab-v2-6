@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Perplexity Connect
+Comment=Auto-send bore port to Perplexity and reconnect
+Exec=/home/kenny/.local/bin/perplexity-connect.sh
+Icon=/home/kenny/.local/share/icons/perplexity-connect.png
+Terminal=false
+Categories=Utility;
+StartupNotify=false

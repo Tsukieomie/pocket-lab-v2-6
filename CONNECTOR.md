@@ -44,3 +44,12 @@ https://raw.githubusercontent.com/Tsukieomie/pocket-lab-v2-6/main/bore-port.txt
 PORT=$(curl -sf https://raw.githubusercontent.com/Tsukieomie/pocket-lab-v2-6/main/bore-port.txt | grep ^port | cut -d= -f2)
 ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -i /home/user/workspace/perplexity_session -p $PORT kenny@bore.pub
 ```
+
+## Restore After Wipe
+
+If the launcher ever disappears (e.g. after a reinstall), restore it with:
+
+```bash
+git clone https://github.com/Tsukieomie/pocket-lab-v2-6.git
+bash pocket-lab-v2-6/linux/install.sh
+```
