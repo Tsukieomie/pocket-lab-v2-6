@@ -1,0 +1,67 @@
+name: Deploy Bore Server to Fly.io
+
+on:
+  workflow_dispatch:  # Manual trigger from GitHub Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Generate bore secret (first run only)
+        id: secret
+        run: |
+          # Only generate if not already set as a Fly secret
+          BORE_SECRET=$(openssl rand -hex 32)
+          echo "bore_secret=$BORE_SECRET" >> $GITHUB_OUTPUT
+          echo "::add-mask::$BORE_SECRET"
+          echo "Generated new bore secret (masked in logs)"
+
+      - name: Create Fly app (idempotent)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl apps create pocket-lab-bore --machines 2>/dev/null || echo "App already exists"
+
+      - name: Set BORE_SECRET on Fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl secrets set BORE_SECRET="${{ steps.secret.outputs.bore_secret }}" \
+            --app pocket-lab-bore
+
+      - name: Deploy bore server
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy --config fly/fly.toml --dockerfile fly/Dockerfile \
+            --app pocket-lab-bore --remote-only
+
+      - name: Allocate IPv4 (if needed)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl ips allocate-v4 --app pocket-lab-bore 2>/dev/null || echo "IP already allocated"
+
+      - name: Print iSH config
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          FLY_IP=$(flyctl ips list --app pocket-lab-bore --json \
+            | python3 -c "import sys,json; ips=json.load(sys.stdin); v4=[i['Address'] for i in ips if i.get('Type')=='v4']; print(v4[0] if v4 else 'pending')")
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "  Paste this into iSH /root/.bore_env  "
+          echo "════════════════════════════════════════"
+          echo "BORE_HOST=$FLY_IP"
+          echo "BORE_PORT=40000"
+          echo "BORE_SECRET=${{ steps.secret.outputs.bore_secret }}"
+          echo "════════════════════════════════════════"
+          echo "Then on iSH run:"
+          echo "  sh /root/perplexity/pocket_lab.sh tunnel up"
+          echo "════════════════════════════════════════"
