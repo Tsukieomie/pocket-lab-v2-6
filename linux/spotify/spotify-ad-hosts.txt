@@ -1,0 +1,22 @@
+# Spotify ad servers — blocked
+0.0.0.0 adclick.g.doubleclicK.net
+0.0.0.0 adeventtracker.spotify.com
+0.0.0.0 ads-fa.spotify.com
+0.0.0.0 audio2.spotify.com
+0.0.0.0 b.scorecardresearch.com
+0.0.0.0 bounceexchange.com
+0.0.0.0 bs.serving-sys.com
+0.0.0.0 content.bitsontherun.com
+0.0.0.0 core.insightexpressai.com
+0.0.0.0 d2gi7ultltnc2u.cloudfront.net
+0.0.0.0 d3rt1990lpmkn.cloudfront.net
+0.0.0.0 doubleclick.net
+0.0.0.0 googleads.g.doubleclick.net
+0.0.0.0 gtssl2-ocsp.geotrust.com
+0.0.0.0 log.spotify.com
+0.0.0.0 media-match.com
+0.0.0.0 omaze.com
+0.0.0.0 pagead2.googlesyndication.com
+0.0.0.0 pubads.g.doubleclick.net
+0.0.0.0 spotify.com.edgesuite.net
+0.0.0.0 v.jwpcdn.com
