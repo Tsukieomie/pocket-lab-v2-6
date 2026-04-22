@@ -1,0 +1,53 @@
+# Pocket Lab — Bore Tunnel Server on Fly.io
+app = "pocket-lab-bore"
+primary_region = "ord"  # Chicago — closest free-tier region for US East
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[services]]
+  internal_port = 7835
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 7835
+
+[[services]]
+  internal_port = 40000
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 40000
+
+[[services]]
+  internal_port = 40001
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 40001
+
+[[services]]
+  internal_port = 40002
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 40002
+
+[[services]]
+  internal_port = 40003
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 40003
+
+[[services]]
+  internal_port = 40004
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 40004
+
+[vm]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
