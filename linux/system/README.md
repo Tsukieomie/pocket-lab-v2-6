@@ -55,3 +55,30 @@ sudo apt install zram-tools
 sudo cp zramswap.conf /etc/default/zramswap
 sudo systemctl enable --now zramswap
 ```
+
+## Network (BBR)
+
+### 99-network-perf.conf → /etc/sysctl.d/
+BBR congestion control, TCP fast-open, tuned rmem/wmem, vfs_cache_pressure=50.
+
+
+## Journal
+
+### 99-journal-size.conf → /etc/systemd/journald.conf.d/
+Caps journal at 100MB, 2-week retention, compression on.
+
+
+## NVMe
+
+### 61-nvme-tuning.rules → /etc/udev/rules.d/
+Bumps read-ahead from 128KB → 2MB for sequential workloads.
+
+
+## Power / Lid
+
+### 99-logind-power.conf → /etc/systemd/logind.conf.d/
+Lid close = suspend, external power = screen lock, idle suspend after 30min.
+
+
+## Disabled Services (no hardware present)
+
