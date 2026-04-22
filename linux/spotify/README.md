@@ -21,3 +21,14 @@ To prevent auto-updates:
 ```bash
 sudo chmod 000 /etc/apt/sources.list.d/spotify.list
 ```
+
+## Auto-update locked (applied)
+```bash
+sudo chmod 000 /etc/apt/sources.list.d/spotify.list
+```
+Spotify is pinned at 1.2.84.476 — apt cannot update it. SpotX patch is permanent.
+
+To re-enable updates later:
+```bash
+sudo chmod 644 /etc/apt/sources.list.d/spotify.list
+```
