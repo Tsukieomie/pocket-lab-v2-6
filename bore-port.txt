@@ -1,0 +1,5 @@
+port=8245
+host=bore.pub
+ssh=ssh -p 8245 kenny@bore.pub
+updated=2026-04-22T21:36:28Z
+machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
