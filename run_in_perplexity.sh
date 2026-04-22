@@ -82,6 +82,7 @@ NONCE=$(openssl rand -hex 32)
 NONCE_SHA=$(printf '%s' "$NONCE" | openssl dgst -sha256 -r | awk '{print $1}')
 APPROVED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EXPIRES_AT=$(date -u -d '+5 minutes' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || date -u -d "@$(($(date +%s) + 300))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
             || date -u -v+5M +%Y-%m-%dT%H:%M:%SZ)
 RUN_ID="perplexity-local-$(date +%s)"
 
