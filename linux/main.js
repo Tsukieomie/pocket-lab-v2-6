@@ -173,18 +173,29 @@ ipcMain.handle('linux-wrapper:status', async () => ({
   platform: process.platform,
 }));
 
-// ── Assistant window (narrow sidebar mode) ────────────────────────────────────
+// ── Assistant window (floating Comet AI overlay) ─────────────────────────────
 function createAssistantWindow() {
+  // Position on the right edge of the primary display
+  const { screen } = require('electron');
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const W = 460, H = Math.min(900, sh - 40);
+  const X = sw - W - 16, Y = Math.round((sh - H) / 2);
+
   const win = new BrowserWindow({
-    width: 460,
-    height: 900,
+    width: W,
+    height: H,
+    x: X,
+    y: Y,
     minWidth: 360,
-    minHeight: 600,
+    minHeight: 500,
     backgroundColor: '#0b0d1a',
     title: 'Perplexity Assistant',
     icon: path.join(__dirname, 'icon.png'),
     show: false,
     autoHideMenuBar: true,
+    alwaysOnTop: true,          // float over all other windows
+    skipTaskbar: false,          // keep in taskbar so it's easy to find
+    resizable: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -199,9 +210,9 @@ function createAssistantWindow() {
 
   win.webContents.on('did-finish-load', () => {
     const url = win.webContents.getURL();
-    if (!url.startsWith('file://') && !isAllowed(url)) {
+    if (!isAllowed(url)) {
       win.loadURL(COMPUTER_URL);
-    } else if (iconB64) {
+    } else {
       injectBranding(win.webContents);
     }
   });
@@ -216,10 +227,14 @@ function createAssistantWindow() {
   });
 
   win.once('ready-to-show', () => win.show());
-  win.on('closed', () => app.quit());
+  // Don't quit app when assistant closes if computer window is also open
+  win.on('closed', () => {
+    const others = BrowserWindow.getAllWindows().filter(w => w !== win);
+    if (others.length === 0) app.quit();
+  });
 
-  // Load the local assistant UI
-  win.loadFile(path.join(__dirname, 'assistant.html'));
+  // Load Comet AI directly
+  win.loadURL(COMPUTER_URL);
   return win;
 }
 
@@ -315,3 +330,4 @@ app.on('activate', () => {
     IS_ASSISTANT ? createAssistantWindow() : createComputerWindow();
   }
 });
+
