@@ -52,7 +52,24 @@ if [ -f "$REPO_DIR/linux/dedup-authorized-keys.sh" ]; then
   bash "$REPO_DIR/linux/dedup-authorized-keys.sh"
 fi
 
-echo ">> Checking ~/.bore_env ..."
+echo ">> Configuring ~/.bore_env ..."
+
+# ── Helper: read/write individual keys in ~/.bore_env ────────────────────────
+# _bore_env_get KEY        — prints current value or empty string
+# _bore_env_set KEY VALUE  — upserts KEY=VALUE (adds if missing, replaces if present)
+_bore_env_get() {
+  grep "^${1}=" "${HOME}/.bore_env" 2>/dev/null | cut -d= -f2- || echo ""
+}
+_bore_env_set() {
+  local KEY="$1" VAL="$2" FILE="${HOME}/.bore_env"
+  if grep -q "^${KEY}=" "$FILE" 2>/dev/null; then
+    sed -i "s|^${KEY}=.*|${KEY}=${VAL}|" "$FILE"
+  else
+    echo "${KEY}=${VAL}" >> "$FILE"
+  fi
+}
+
+# Create ~/.bore_env with defaults if it doesn't exist
 if [ ! -f "${HOME}/.bore_env" ]; then
   cat > "${HOME}/.bore_env" << 'BOREENV'
 BORE_HOST=bore.pub
@@ -61,9 +78,40 @@ BORE_SECRET=
 SSH_KEY_PATH=
 GH_TOKEN=
 BOREENV
-  echo "   Created ~/.bore_env — edit it with your BORE_HOST / BORE_SECRET / GH_TOKEN"
+  echo "   Created ~/.bore_env"
+fi
+
+# ── GH_TOKEN — prompt if missing or empty ────────────────────────────────────
+# GH_TOKEN is required for tunnel.sh to push bore-port.txt to GitHub
+# so Perplexity Computer can always find the current port.
+CURRENT_TOKEN=$(_bore_env_get GH_TOKEN)
+if [ -z "$CURRENT_TOKEN" ]; then
+  echo ""
+  echo "   ┌─────────────────────────────────────────────────────────────┐"
+  echo "   │  GitHub Token required for automatic bore-port.txt sync     │"
+  echo "   │                                                             │"
+  echo "   │  Create one at: https://github.com/settings/tokens/new     │"
+  echo "   │  Scopes needed: repo (Contents read+write)                  │"
+  echo "   │                                                             │"
+  echo "   │  Press Enter to skip (tunnel will work but port won't       │"
+  echo "   │  auto-sync to GitHub — you'll need to run sync-port manually)│"
+  echo "   └─────────────────────────────────────────────────────────────┘"
+  echo ""
+  if [ -t 0 ]; then
+    # Running interactively — prompt
+    read -r -p "   GitHub Personal Access Token (ghp_...): " INPUT_TOKEN
+    if [ -n "$INPUT_TOKEN" ]; then
+      _bore_env_set GH_TOKEN "$INPUT_TOKEN"
+      echo "   GH_TOKEN saved to ~/.bore_env ✓"
+    else
+      echo "   Skipped — run: nano ~/.bore_env  to add GH_TOKEN later"
+    fi
+  else
+    # Non-interactive (piped) — skip prompt, leave GH_TOKEN empty
+    echo "   Non-interactive mode — set GH_TOKEN in ~/.bore_env manually"
+  fi
 else
-  echo "   ~/.bore_env already exists — not overwriting"
+  echo "   GH_TOKEN already set in ~/.bore_env ✓"
 fi
 
 echo ""
