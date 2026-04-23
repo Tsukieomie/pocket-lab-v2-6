@@ -5,7 +5,7 @@
 
   "pdf_sha256": "38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134",
 
-  "approval_pubkey_sha256": "8fdcd3a50486581e75a0d374af505fa4795a98b71aa31c01ad96f88d2c667489",
+  "approval_pubkey_sha256": "a5946ca3a316fcb8d55e02ab6cac7a124a216a4de9291632a0518d6258116420",
   "approval_signature_algorithm": "ECDSA-secp256k1-SHA256",
   "approval_schema": "pocket_lab_signed_approval_v1",
   "approval_ttl_minutes": 5,
