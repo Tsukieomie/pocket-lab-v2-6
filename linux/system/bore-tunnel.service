@@ -22,6 +22,13 @@ Environment=BORE_SECRET=
 # ── Resolve bore binary: prefer ~/.local/bin, then PATH ──
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
+# ── Pre-start: verify bore binary exists ─────────────────
+ExecStartPre=/bin/sh -c '\
+  if ! command -v bore >/dev/null 2>&1; then \
+    echo "[bore-tunnel] ERROR: bore not found in PATH. Run: bash %h/pocket-lab-v2-6/linux/tunnel.sh install-bore"; \
+    exit 1; \
+  fi'
+
 ExecStart=/bin/sh -c '\
   BORE_BIN=$(command -v bore 2>/dev/null || echo ""); \
   if [ -z "$BORE_BIN" ]; then \
@@ -30,14 +37,49 @@ ExecStart=/bin/sh -c '\
   fi; \
   PORT_ARG=""; [ -n "${BORE_PORT}" ] && PORT_ARG="--port ${BORE_PORT}"; \
   SECRET_ARG=""; [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"; \
+  echo "[bore-tunnel] Starting: bore local 22 --to ${BORE_HOST:-bore.pub} $PORT_ARG ..."; \
   exec "$BORE_BIN" local 22 --to "${BORE_HOST:-bore.pub}" $PORT_ARG $SECRET_ARG'
 
-# ── Restart policy ────────────────────────────────────────
+# ── Post-start: push port immediately once bore reports it ─
+# Polls up to 15s so bore-port.txt is always current on startup.
+ExecStartPost=/bin/sh -c '\
+  REPO_DIR="%h/pocket-lab-v2-6"; \
+  TUNNEL_SH="$REPO_DIR/linux/tunnel.sh"; \
+  LIVE_PORT=""; \
+  for i in $(seq 1 15); do \
+    sleep 1; \
+    LIVE_PORT=$(journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
+      | sed "s/\x1b\[[0-9;]*m//g" \
+      | grep -oE "remote_port=[0-9]+" | tail -1 | cut -d= -f2 || echo ""); \
+    [ -n "$LIVE_PORT" ] && break; \
+  done; \
+  if [ -n "$LIVE_PORT" ]; then \
+    echo "[bore-tunnel] Port ready: $LIVE_PORT — syncing..."; \
+    bash "$TUNNEL_SH" sync-port 2>&1 || true; \
+  else \
+    echo "[bore-tunnel] WARNING: bore did not report a port within 15s"; \
+  fi'
+
+# ── Stop: clean up bore-port.txt to signal tunnel is down ─
+ExecStopPost=/bin/sh -c '\
+  REPO_DIR="%h/pocket-lab-v2-6"; \
+  if [ -f "$REPO_DIR/bore-port.txt" ]; then \
+    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ); \
+    sed -i "s/^port=.*/port=DOWN/" "$REPO_DIR/bore-port.txt"; \
+    sed -i "s/^updated=.*/updated=${TIMESTAMP}/" "$REPO_DIR/bore-port.txt"; \
+    echo "[bore-tunnel] bore-port.txt marked DOWN"; \
+  fi'
+
+# ── Restart policy: exponential backoff ──────────────────
 Restart=on-failure
 RestartSec=5
-# Exponential backoff cap at 60s
 RestartSteps=6
 RestartMaxDelaySec=60
+
+# ── Watchdog: if bore silently hangs, restart it ─────────
+# bore should produce output quickly; 120s with no activity = dead
+WatchdogSec=120
+NotifyAccess=none
 
 # ── Hardening ─────────────────────────────────────────────
 NoNewPrivileges=true
