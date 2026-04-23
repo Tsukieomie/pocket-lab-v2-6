@@ -1,5 +1,5 @@
-port=4560
+port=Apr 23 14:06:14 kenny-VivoBook-ASUSLaptop-X513IA-M513IA systemd[2426]: Started bore-tunnel.service - Pocket Lab — bore SSH tunnel.
 host=bore.pub
-ssh=ssh -p 4560 kenny@bore.pub
-updated=2026-04-23T16:07:15Z
+ssh=ssh -p Apr 23 14:06:14 kenny-VivoBook-ASUSLaptop-X513IA-M513IA systemd[2426]: Started bore-tunnel.service - Pocket Lab — bore SSH tunnel. kenny@bore.pub
+updated=2026-04-23T18:06:14Z
 machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
