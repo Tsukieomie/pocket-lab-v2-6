@@ -4,6 +4,13 @@
 set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$REPO_DIR/.." && pwd)"
+
+# bore-port.txt is a live runtime file updated by the tunnel on every restart.
+# Mark it skip-worktree so git pull never conflicts with local changes.
+if git -C "$REPO_ROOT" ls-files --error-unmatch bore-port.txt >/dev/null 2>&1; then
+  git -C "$REPO_ROOT" update-index --skip-worktree bore-port.txt 2>/dev/null || true
+fi
 
 echo ">> Installing xclip (needed for clipboard paste)..."
 sudo apt-get install -y -q xclip
