@@ -10,7 +10,7 @@
 #   OPENAI_API_KEY     → GPT-4o / GPT-4o-mini
 #   PERPLEXITY_API_KEY → Sonar (pplx-70b-online)
 #   OLLAMA_URL         → Dolphin3 / any local model (default: http://localhost:11434)
-#   SUPERMEMORY_API_KEY → Routes to OpenRouter free models via Supermemory Memory Router
+#   SUPERMEMORY_API_KEY → Semantic memory backend (context injection + run archival)
 #
 # Usage:
 #   python3 parallel_ai.py "your prompt here"
@@ -425,6 +425,107 @@ def print_json(results: list, prompt: str):
     print(json.dumps(out, indent=2, ensure_ascii=False))
 
 
+# ── Supermemory integration ──────────────────────────────────
+
+SM_API   = "https://api.supermemory.ai/v3"
+SM_USER  = "pocket-lab-user"
+
+def _sm_key() -> str:
+    """Resolve SUPERMEMORY_API_KEY from env or ~/.mem0_env file."""
+    key = os.environ.get("SUPERMEMORY_API_KEY", "")
+    if not key:
+        for env_file in ["/root/.mem0_env", os.path.expanduser("~/.mem0_env")]:
+            if os.path.exists(env_file):
+                for line in open(env_file).read().splitlines():
+                    if line.startswith("SUPERMEMORY_API_KEY="):
+                        key = line.split("=", 1)[1].strip()
+                        break
+            if key:
+                break
+    return key
+
+
+def supermemory_fetch_context(prompt: str) -> str:
+    """Search Supermemory for relevant past context to inject into prompt."""
+    try:
+        import urllib.request
+        key = _sm_key()
+        if not key:
+            return ""
+        params = urllib.parse.urlencode({"q": prompt[:200], "limit": 5})
+        req = urllib.request.Request(
+            f"{SM_API}/search?{params}",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "x-sm-user-id": SM_USER,
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.load(resp)
+        results = data.get("results", [])
+        if not results:
+            return ""
+        ctx_parts = []
+        for r in results:
+            content = r.get("memory") or r.get("chunk") or ""
+            if content:
+                ctx_parts.append(content.strip())
+        if not ctx_parts:
+            return ""
+        ctx = "\n---\n".join(ctx_parts)
+        print(f"{DIM}[supermemory] injecting {len(ctx_parts)} memory chunk(s) as context{RESET}")
+        return f"[Relevant context from memory:]\n{ctx}\n\n[Your query:]"
+    except Exception as e:
+        print(f"{DIM}[supermemory] context fetch skipped: {e}{RESET}")
+        return ""
+
+
+def supermemory_save_run(prompt: str, results: list):
+    """Save prompt + all model responses to Supermemory for future context."""
+    try:
+        import urllib.request
+        key = _sm_key()
+        if not key:
+            return
+        # Build a rich memory document
+        responses = []
+        for r in results:
+            if r.text and not r.error:
+                responses.append(f"[{r.label} — {r.elapsed:.1f}s]\n{r.text}")
+        if not responses:
+            return
+        content = (
+            f"Pocket Lab Parallel AI Run — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"Prompt: {prompt}\n\n"
+            + "\n\n".join(responses)
+        )
+        payload = {
+            "content": content,
+            "containerTags": [SM_USER, "pocket-lab"],
+            "metadata": {
+                "source": "parallel_ai",
+                "models": [r.key for r in results if not r.error],
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+        }
+        req = urllib.request.Request(
+            f"{SM_API}/memories",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "x-sm-user-id": SM_USER,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            pass
+        print(f"{DIM}[supermemory] run saved to memory graph{RESET}")
+    except Exception as e:
+        print(f"{DIM}[supermemory] save skipped: {e}{RESET}")
+
+
 # ── mem0 integration ─────────────────────────────────────────
 
 def mem0_save_run(prompt: str, results: list):
@@ -577,6 +678,13 @@ def main():
                   file=sys.stderr)
             sys.exit(1)
 
+    # ── Supermemory context injection ─────────────────────────
+    sm_context = ""
+    if not args.no_supermemory:
+        sm_context = supermemory_fetch_context(args.prompt)
+    if sm_context:
+        args.prompt = sm_context + args.prompt
+
     # ── Banner ─────────────────────────────────────────────────
     if not args.json:
         print(f"\n{BOLD}Pocket Lab — Parallel AI{RESET}  "
@@ -598,14 +706,21 @@ def main():
     else:
         print_results(results, args.prompt)
 
-    # ── mem0 save ──────────────────────────────────────────────
+    # ── mem0 + Supermemory save ──────────────────────────────
     if not args.no_mem0:
         threading.Thread(
             target=mem0_save_run,
             args=(args.prompt, results),
             daemon=True
         ).start()
-        time.sleep(0.3)  # brief window for async save
+    if not args.no_supermemory:
+        threading.Thread(
+            target=supermemory_save_run,
+            args=(args.prompt, results),
+            daemon=True
+        ).start()
+    if not args.no_mem0 or not args.no_supermemory:
+        time.sleep(0.5)  # brief window for async saves
 
 
 if __name__ == "__main__":
