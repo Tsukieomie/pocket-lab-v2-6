@@ -1,0 +1,12 @@
+#!/bin/sh
+# post-merge — runs after git pull (merge) and git merge
+# Ensures merge.ours driver and skip-worktree are always active
+# regardless of whether install.sh has been run on this machine.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# Register 'ours' merge driver (required for .gitattributes merge=ours)
+git -C "$REPO_ROOT" config merge.ours.driver true 2>/dev/null || true
+
+# Re-apply skip-worktree on bore-port.txt (survives git checkout, lost on fresh clone)
+git -C "$REPO_ROOT" ls-files --error-unmatch bore-port.txt >/dev/null 2>&1 \
+  && git -C "$REPO_ROOT" update-index --skip-worktree bore-port.txt 2>/dev/null || true

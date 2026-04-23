@@ -1,0 +1,14 @@
+#!/bin/sh
+# post-checkout — runs after git checkout and git clone
+# Args: $1=prev HEAD, $2=new HEAD, $3=1 if branch checkout (0 if file)
+# Only act on branch checkouts (not file checkouts)
+[ "$3" = "1" ] || exit 0
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# Register 'ours' merge driver
+git -C "$REPO_ROOT" config merge.ours.driver true 2>/dev/null || true
+
+# Re-apply skip-worktree on bore-port.txt
+git -C "$REPO_ROOT" ls-files --error-unmatch bore-port.txt >/dev/null 2>&1 \
+  && git -C "$REPO_ROOT" update-index --skip-worktree bore-port.txt 2>/dev/null || true

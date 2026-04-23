@@ -16,6 +16,30 @@ if git -C "$REPO_ROOT" ls-files --error-unmatch bore-port.txt >/dev/null 2>&1; t
 fi
 git -C "$REPO_ROOT" config merge.ours.driver true 2>/dev/null || true
 
+# Install git hooks so every future pull auto-re-registers the driver
+# and skip-worktree without needing install.sh to run again.
+echo ">> Installing git hooks..."
+HOOKS_SRC="$REPO_DIR/hooks"
+HOOKS_DST="$REPO_ROOT/.git/hooks"
+for HOOK in post-merge post-checkout; do
+  SRC="$HOOKS_SRC/$HOOK"
+  DST="$HOOKS_DST/$HOOK"
+  if [ ! -f "$SRC" ]; then
+    echo "   [skip] $HOOK not found in linux/hooks/"
+    continue
+  fi
+  if [ -f "$DST" ] && ! grep -q "pocket-lab" "$DST" 2>/dev/null; then
+    # Existing hook not ours — append to avoid overwriting user hooks
+    printf '\n' >> "$DST"
+    cat "$SRC" >> "$DST"
+    echo "   $HOOK: appended to existing hook"
+  else
+    cp "$SRC" "$DST"
+    chmod +x "$DST"
+    echo "   $HOOK: installed"
+  fi
+done
+
 echo ">> Installing xclip (needed for clipboard paste)..."
 sudo apt-get install -y -q xclip
 
