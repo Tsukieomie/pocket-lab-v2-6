@@ -1,5 +1,5 @@
-port=53159
+port=62076
 host=bore.pub
-ssh=ssh -p 53159 kenny@bore.pub
-updated=2026-04-23T08:20:12Z
+ssh=ssh -p 62076 kenny@bore.pub
+updated=2026-04-23T08:24:44Z
 machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
