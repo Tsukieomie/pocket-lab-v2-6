@@ -117,14 +117,7 @@ MODELS = {
         "model_id": "llama-3.1-sonar-large-128k-online",
     },
     "dolphin": {
-        "label":    "Dolphin3-7b (Ollama/local)",
-        "env":      None,
-        "color":    YELLOW,
-        "fn":       "_run_ollama",
-        "model_id": "cognitivecomputations/dolphin3.0-qwen2.5:7b",
-    },
-    "dolphin-3b": {
-        "label":    "Dolphin3-3b (Ollama/local)",
+        "label":    "Dolphin3 (Ollama/local)",
         "env":      None,
         "color":    YELLOW,
         "fn":       "_run_ollama",
