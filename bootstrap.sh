@@ -35,15 +35,21 @@ for HOOK in post-merge post-checkout; do
     echo "  [skip] $HOOK not found in linux/hooks/"
     continue
   fi
-  if [ -f "$DST" ] && ! grep -q "pocket-lab" "$DST" 2>/dev/null; then
-    # Existing hook not ours — append rather than overwrite
-    echo "" >> "$DST"
+  if [ ! -f "$DST" ]; then
+    # No existing hook — install directly
+    cp "$SRC" "$DST" && chmod +x "$DST"
+    echo "  $HOOK installed ✓"
+  elif diff -q "$SRC" "$DST" >/dev/null 2>&1; then
+    # Already identical — skip
+    echo "  $HOOK already up to date – skipping"
+  elif grep -qF "$(head -2 "$SRC" | tail -1)" "$DST" 2>/dev/null; then
+    # Our hook content is already present in the file (appended previously)
+    echo "  $HOOK already present in existing hook – skipping"
+  else
+    # Existing hook is someone else's — append ours, don't overwrite
+    printf '\n' >> "$DST"
     cat "$SRC" >> "$DST"
     echo "  $HOOK appended to existing hook ✓"
-  else
-    cp "$SRC" "$DST"
-    chmod +x "$DST"
-    echo "  $HOOK installed ✓"
   fi
 done
 
