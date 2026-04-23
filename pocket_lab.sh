@@ -22,7 +22,7 @@
 # ============================================================
 set -eu
 
-WORK="/root/perplexity"
+WORK="${POCKET_LAB_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 SEC="/root/.pocket_lab_secure"
 PINS="$WORK/schema/pins.json"
 BORE_ENV="/root/.bore_env"
