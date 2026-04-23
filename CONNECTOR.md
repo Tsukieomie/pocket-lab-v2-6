@@ -42,8 +42,10 @@ https://raw.githubusercontent.com/Tsukieomie/pocket-lab-v2-6/main/bore-port.txt
 
 ```bash
 PORT=$(curl -sf https://raw.githubusercontent.com/Tsukieomie/pocket-lab-v2-6/main/bore-port.txt | grep ^port | cut -d= -f2)
-ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -i /home/user/workspace/perplexity_session -p $PORT kenny@bore.pub
+ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -i /home/user/.ssh/pocket_lab_perplexity -p $PORT kenny@bore.pub
 ```
+
+> **Key path note:** The Perplexity Computer private key is stored at `/home/user/.ssh/pocket_lab_perplexity` in the cloud sandbox. The matching public key lives in [`keys/perplexity_computer_ed25519.pub`](keys/perplexity_computer_ed25519.pub) and must be in `~/.ssh/authorized_keys` on the Linux machine (kenny's home dir, not /root).
 
 ## Restore After Wipe
 

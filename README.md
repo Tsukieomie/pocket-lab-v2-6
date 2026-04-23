@@ -56,8 +56,11 @@ All cryptographic verification that doesn't require on-device secrets runs and m
 
 Scripts are designed for iSH (which runs as root). On a normal Linux user account, use the Linux-specific wrappers — **no sudo required**.
 
+> **SSH key location:** On a normal Linux account always use `~/.ssh/` (e.g. `/home/kenny/.ssh/`). Do **not** use `/root/.ssh/` — that requires sudo and is not where sshd looks for your user's authorized keys.
+
 ```sh
-# One-time setup (installs bore + tunnel script + ~/.bore_env template)
+# One-time setup (installs bore + tunnel script + ~/.bore_env template
+# AND adds Perplexity Computer pubkey to ~/.ssh/authorized_keys automatically)
 bash ~/pocket-lab-v2-6/linux/install.sh
 
 # Start the tunnel (exposes local SSH port 22 via bore)
@@ -186,7 +189,7 @@ All tunnel, SSH, and token config lives in `/root/.bore_env` (not committed to a
 BORE_HOST=<your-vps-ip-or-wireguard-ip>   # or bore.pub (fallback)
 BORE_PORT=2222                             # SSH tunnel port
 BORE_SECRET=<bore-shared-secret>           # if self-hosted bore
-SSH_KEY_PATH=/root/.ssh/pocket_lab_ed25519 # preferred over password
+SSH_KEY_PATH=/home/kenny/.ssh/pocket_lab_ed25519 # preferred over password (use $HOME/.ssh — NOT /root/.ssh on Linux)
 SSH_PASS=<password>                        # legacy fallback only
 GH_TOKEN=<github-pat>                      # enables async Contents API publish
 MEM0_API_KEY=<mem0-api-key>               # in /root/.mem0_env (separate file)

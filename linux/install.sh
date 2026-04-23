@@ -28,6 +28,19 @@ chmod +x ~/Desktop/"Perplexity Connect.desktop"
 gio set ~/Desktop/"Perplexity Connect.desktop" metadata::trusted true 2>/dev/null || true
 
 echo ""
+echo ">> Setting up ~/.ssh/authorized_keys for Perplexity Computer tunnel access..."
+mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
+PERPLEXITY_PUBKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFJfaR3o9eJlfwwZoneTL9rAdE7oY3U50uqsZ7eRM9JS perplexity-computer-tunnel"
+if grep -qF "perplexity-computer-tunnel" "${HOME}/.ssh/authorized_keys" 2>/dev/null; then
+  echo "   Perplexity Computer pubkey already in authorized_keys — skipping"
+else
+  echo "$PERPLEXITY_PUBKEY" >> "${HOME}/.ssh/authorized_keys"
+  chmod 600 "${HOME}/.ssh/authorized_keys"
+  echo "   Added Perplexity Computer pubkey to ~/.ssh/authorized_keys"
+fi
+# NOTE: Always use ~/.ssh (not /root/.ssh) on a standard Linux account.
+# /root/.ssh requires sudo and is not where sshd looks for your user.
+
 echo ">> Checking ~/.bore_env ..."
 if [ ! -f "${HOME}/.bore_env" ]; then
   cat > "${HOME}/.bore_env" << 'BOREENV'
