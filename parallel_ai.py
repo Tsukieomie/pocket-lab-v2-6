@@ -95,7 +95,7 @@ MODELS = {
         "env":      None,
         "color":    YELLOW,
         "fn":       "_run_ollama",
-        "model_id": "dolphin3:latest",
+        "model_id": "nchapman/dolphin3.0-qwen2.5:latest",
     },
     "mistral": {
         "label":    "Mistral (Ollama/local)",
@@ -424,17 +424,23 @@ def mem0_save_run(prompt: str, results: list):
 def detect_available_models() -> list:
     """Return model keys where the required API key is present."""
     available = []
+    # Fetch pulled Ollama model names once
+    ollama_models = set()
+    try:
+        import urllib.request
+        base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        with urllib.request.urlopen(f"{base}/api/tags", timeout=2) as resp:
+            data = json.load(resp)
+        ollama_models = {m["name"] for m in data.get("models", [])}
+    except Exception:
+        pass
+
     for key, cfg in MODELS.items():
         env = cfg.get("env")
         if env is None:
-            # Ollama — probe if server is up
-            try:
-                import urllib.request
-                base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-                urllib.request.urlopen(f"{base}/api/tags", timeout=2)
+            # Ollama — check if the specific model is actually pulled
+            if cfg["model_id"] in ollama_models:
                 available.append(key)
-            except Exception:
-                pass
         elif os.environ.get(env):
             available.append(key)
     return available
