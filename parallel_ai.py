@@ -512,7 +512,7 @@ def supermemory_save_run(prompt: str, results: list):
             }
         }
         req = urllib.request.Request(
-            f"{SM_API}/memories",
+            f"{SM_API}/documents",
             data=json.dumps(payload).encode(),
             headers={
                 "Authorization": f"Bearer {key}",
