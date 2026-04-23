@@ -1,5 +1,5 @@
-port=18305
+port=17645
 host=bore.pub
-ssh=ssh -p 18305 kenny@bore.pub
-updated=2026-04-23T02:15:19Z
+ssh=ssh -p 17645 kenny@bore.pub
+updated=2026-04-23T02:17:41Z
 machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
