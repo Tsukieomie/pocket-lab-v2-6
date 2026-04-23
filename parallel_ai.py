@@ -301,6 +301,47 @@ _RUNNERS = {
 }
 
 
+# ── Dolphin pre-compressor ───────────────────────────────────
+
+def dolphin_compress(prompt: str, timeout: int = 60) -> str:
+    """
+    Send prompt to local Dolphin3 first. Dolphin compresses it to
+    the shortest possible intent-preserving version. Returns the
+    compressed prompt (falls back to original on any error).
+    """
+    system = (
+        "You are a prompt compressor. Rewrite the user message as the "
+        "shortest possible prompt preserving 100% of intent and context. "
+        "Remove all filler, pleasantries, redundancy. "
+        "Output ONLY the compressed prompt. No explanation. No preamble."
+    )
+    try:
+        import urllib.request
+        base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        payload = {
+            "model": "nchapman/dolphin3.0-qwen2.5:latest",
+            "system": system,
+            "prompt": prompt,
+            "stream": False,
+        }
+        req = urllib.request.Request(
+            f"{base}/api/generate",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        compressed = data.get("response", "").strip()
+        if compressed:
+            saving = round((1 - len(compressed) / len(prompt)) * 100)
+            print(f"{DIM}[dolphin-compress] {len(prompt)} → {len(compressed)} chars ({saving}% reduction){RESET}")
+            return compressed
+    except Exception as e:
+        print(f"{DIM}[dolphin-compress] skipped: {e}{RESET}")
+    return prompt
+
+
 # ── Core dispatcher ──────────────────────────────────────────
 
 def run_parallel(prompt: str,
@@ -634,6 +675,8 @@ def main():
                         help="Skip saving run to mem0")
     parser.add_argument("--no-supermemory",  action="store_true",
                         help="Skip Supermemory context injection and save")
+    parser.add_argument("--compress", "-c",  action="store_true",
+                        help="Pre-compress prompt via local Dolphin3 to minimize cloud token usage")
 
     args = parser.parse_args()
 
@@ -681,6 +724,14 @@ def main():
             print(f"  ANTHROPIC_API_KEY, OPENAI_API_KEY, PERPLEXITY_API_KEY, or run Ollama locally.",
                   file=sys.stderr)
             sys.exit(1)
+
+    # ── Dolphin pre-compression ───────────────────────────────
+    if args.compress:
+        if not args.json:
+            print(f"{DIM}[dolphin-compress] compressing prompt via local Dolphin3...{RESET}")
+        args.prompt = dolphin_compress(args.prompt, timeout=args.timeout)
+        if not args.json:
+            print(f"{DIM}Compressed prompt: {args.prompt[:120]}{'...' if len(args.prompt)>120 else ''}{RESET}\n")
 
     # ── Supermemory context injection ─────────────────────────
     sm_context = ""
