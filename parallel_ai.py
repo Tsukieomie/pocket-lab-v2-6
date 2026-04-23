@@ -1,0 +1,550 @@
+#!/usr/bin/env python3
+# ============================================================
+# parallel_ai.py — Pocket Lab Parallel AI Tool (v1.0)
+#
+# Fires a prompt simultaneously at multiple AI providers
+# and streams results side-by-side as they arrive.
+#
+# Providers supported (via env vars):
+#   ANTHROPIC_API_KEY  → Claude claude-opus-4-5 / claude-sonnet-4-5
+#   OPENAI_API_KEY     → GPT-4o / GPT-4o-mini
+#   PERPLEXITY_API_KEY → Sonar (pplx-70b-online)
+#   OLLAMA_URL         → Dolphin3 / any local model (default: http://localhost:11434)
+#
+# Usage:
+#   python3 parallel_ai.py "your prompt here"
+#   python3 parallel_ai.py --models claude,gpt4o "your prompt"
+#   python3 parallel_ai.py --list-models
+#   python3 parallel_ai.py --timeout 30 "fast answer needed"
+#   python3 parallel_ai.py --json "your prompt"   # machine-readable output
+#
+# Integrates with Pocket Lab:
+#   - Reads MEM0_API_KEY from /root/.mem0_env (saves run event)
+#   - Can be called from pocket_lab.sh: pocket_lab.sh ai "prompt"
+#   - Gate-agnostic: runs standalone, no vault unlock required
+# ============================================================
+
+import os
+import sys
+import json
+import time
+import argparse
+import threading
+import textwrap
+from datetime import datetime, timezone
+from typing import Optional
+
+# ── ANSI colors ──────────────────────────────────────────────
+RESET  = "\033[0m"
+BOLD   = "\033[1m"
+DIM    = "\033[2m"
+RED    = "\033[91m"
+GREEN  = "\033[92m"
+YELLOW = "\033[93m"
+CYAN   = "\033[96m"
+MAGENTA= "\033[95m"
+BLUE   = "\033[94m"
+
+MODEL_COLORS = {
+    "claude":   CYAN,
+    "gpt4o":    GREEN,
+    "sonar":    MAGENTA,
+    "dolphin":  YELLOW,
+    "gemini":   BLUE,
+}
+
+# ── Model registry ────────────────────────────────────────────
+MODELS = {
+    "claude": {
+        "label":    "Claude (Anthropic)",
+        "env":      "ANTHROPIC_API_KEY",
+        "color":    CYAN,
+        "fn":       "_run_anthropic",
+        "model_id": "claude-opus-4-5",
+    },
+    "claude-sonnet": {
+        "label":    "Claude Sonnet (Anthropic)",
+        "env":      "ANTHROPIC_API_KEY",
+        "color":    CYAN,
+        "fn":       "_run_anthropic",
+        "model_id": "claude-sonnet-4-5",
+    },
+    "gpt4o": {
+        "label":    "GPT-4o (OpenAI)",
+        "env":      "OPENAI_API_KEY",
+        "color":    GREEN,
+        "fn":       "_run_openai",
+        "model_id": "gpt-4o",
+    },
+    "gpt4o-mini": {
+        "label":    "GPT-4o-mini (OpenAI)",
+        "env":      "OPENAI_API_KEY",
+        "color":    GREEN,
+        "fn":       "_run_openai",
+        "model_id": "gpt-4o-mini",
+    },
+    "sonar": {
+        "label":    "Sonar (Perplexity)",
+        "env":      "PERPLEXITY_API_KEY",
+        "color":    MAGENTA,
+        "fn":       "_run_perplexity",
+        "model_id": "llama-3.1-sonar-large-128k-online",
+    },
+    "dolphin": {
+        "label":    "Dolphin3 (Ollama/local)",
+        "env":      None,
+        "color":    YELLOW,
+        "fn":       "_run_ollama",
+        "model_id": "dolphin3:latest",
+    },
+    "mistral": {
+        "label":    "Mistral (Ollama/local)",
+        "env":      None,
+        "color":    YELLOW,
+        "fn":       "_run_ollama",
+        "model_id": "mistral:latest",
+    },
+}
+
+
+# ── Result container ─────────────────────────────────────────
+class ModelResult:
+    def __init__(self, key: str):
+        self.key      = key
+        self.label    = MODELS[key]["label"]
+        self.color    = MODELS[key]["color"]
+        self.text     = ""
+        self.error    = None
+        self.elapsed  = 0.0
+        self.done     = False
+        self.tokens   = {}
+
+
+# ── Provider runners ─────────────────────────────────────────
+
+def _run_anthropic(prompt: str, model_id: str, system: str,
+                   result: ModelResult, timeout: int):
+    try:
+        import urllib.request
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not key:
+            result.error = "ANTHROPIC_API_KEY not set"
+            return
+        payload = {
+            "model": model_id,
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if system:
+            payload["system"] = system
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=json.dumps(payload).encode(),
+            headers={
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        result.text   = data["content"][0]["text"]
+        result.tokens = data.get("usage", {})
+    except Exception as e:
+        result.error = str(e)
+
+
+def _run_openai(prompt: str, model_id: str, system: str,
+                result: ModelResult, timeout: int):
+    try:
+        import urllib.request
+        key = os.environ.get("OPENAI_API_KEY", "")
+        if not key:
+            result.error = "OPENAI_API_KEY not set"
+            return
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        result.text   = data["choices"][0]["message"]["content"]
+        result.tokens = data.get("usage", {})
+    except Exception as e:
+        result.error = str(e)
+
+
+def _run_perplexity(prompt: str, model_id: str, system: str,
+                    result: ModelResult, timeout: int):
+    try:
+        import urllib.request
+        key = os.environ.get("PERPLEXITY_API_KEY", "")
+        if not key:
+            result.error = "PERPLEXITY_API_KEY not set"
+            return
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
+        req = urllib.request.Request(
+            "https://api.perplexity.ai/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        result.text   = data["choices"][0]["message"]["content"]
+        result.tokens = data.get("usage", {})
+    except Exception as e:
+        result.error = str(e)
+
+
+def _run_ollama(prompt: str, model_id: str, system: str,
+                result: ModelResult, timeout: int):
+    try:
+        import urllib.request
+        base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        payload = {
+            "model": model_id,
+            "prompt": prompt,
+            "stream": False,
+        }
+        if system:
+            payload["system"] = system
+        req = urllib.request.Request(
+            f"{base}/api/generate",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        result.text = data.get("response", "")
+    except Exception as e:
+        result.error = str(e)
+
+
+_RUNNERS = {
+    "_run_anthropic":  _run_anthropic,
+    "_run_openai":     _run_openai,
+    "_run_perplexity": _run_perplexity,
+    "_run_ollama":     _run_ollama,
+}
+
+
+# ── Core dispatcher ──────────────────────────────────────────
+
+def run_parallel(prompt: str,
+                 model_keys: list,
+                 system: str = "",
+                 timeout: int = 45,
+                 as_json: bool = False) -> list:
+    """
+    Fire all model_keys simultaneously. Block until all finish or timeout.
+    Returns list of ModelResult.
+    """
+    results = {k: ModelResult(k) for k in model_keys}
+    threads = []
+
+    def worker(key):
+        cfg    = MODELS[key]
+        result = results[key]
+        fn     = _RUNNERS[cfg["fn"]]
+        t0     = time.time()
+        fn(prompt, cfg["model_id"], system, result, timeout)
+        result.elapsed = round(time.time() - t0, 2)
+        result.done    = True
+
+    for key in model_keys:
+        t = threading.Thread(target=worker, args=(key,), daemon=True)
+        threads.append(t)
+        t.start()
+
+    if not as_json:
+        _print_progress(results, model_keys, timeout)
+    else:
+        for t in threads:
+            t.join(timeout=timeout + 2)
+
+    return [results[k] for k in model_keys]
+
+
+def _print_progress(results: dict, model_keys: list, timeout: int):
+    """Animate a live wait indicator until all models finish."""
+    import sys
+    spinner = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
+    i = 0
+    t0 = time.time()
+    while True:
+        done   = [k for k in model_keys if results[k].done]
+        active = [k for k in model_keys if not results[k].done]
+        elapsed = round(time.time() - t0, 1)
+
+        parts = []
+        for k in model_keys:
+            r   = results[k]
+            col = r.color
+            if r.done:
+                if r.error:
+                    parts.append(f"{col}✗ {k}{RESET}")
+                else:
+                    parts.append(f"{col}✓ {k} ({r.elapsed}s){RESET}")
+            else:
+                parts.append(f"{DIM}{spinner[i % len(spinner)]} {k}{RESET}")
+
+        sys.stderr.write(f"\r  {' │ '.join(parts)}  [{elapsed}s]   ")
+        sys.stderr.flush()
+
+        if not active or elapsed > timeout + 2:
+            break
+        time.sleep(0.1)
+        i += 1
+
+    sys.stderr.write("\r" + " " * 80 + "\r")
+    sys.stderr.flush()
+
+
+# ── Output formatters ────────────────────────────────────────
+
+def print_results(results: list, prompt: str):
+    width = min(os.get_terminal_size().columns, 100) if hasattr(os, 'get_terminal_size') else 80
+    sep   = "─" * width
+
+    print(f"\n{BOLD}╔{'═'*(width-2)}╗{RESET}")
+    print(f"{BOLD}║  PARALLEL AI — {len(results)} model(s)  │  {datetime.now().strftime('%H:%M:%S')}{' '*(width-48)}║{RESET}")
+    print(f"{BOLD}╚{'═'*(width-2)}╝{RESET}")
+    print(f"{DIM}Prompt: {prompt[:120]}{'...' if len(prompt)>120 else ''}{RESET}\n")
+
+    for r in results:
+        col = r.color
+        if r.error:
+            status = f"{RED}✗ ERROR{RESET}"
+            body   = f"{RED}{r.error}{RESET}"
+        else:
+            status = f"{GREEN}✓ {r.elapsed}s{RESET}"
+            # Wrap body to terminal width
+            wrapped = textwrap.fill(r.text.strip(), width=width - 4,
+                                    subsequent_indent="    ")
+            body = wrapped
+
+        print(f"{col}{BOLD}┌─ {r.label} {status}{RESET}")
+        print(f"{col}│{RESET}")
+        for line in body.split("\n"):
+            print(f"{col}│{RESET}  {line}")
+        print(f"{col}└{sep[1:]}{RESET}\n")
+
+
+def print_json(results: list, prompt: str):
+    out = {
+        "prompt":    prompt,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "results": [
+            {
+                "model":   r.key,
+                "label":   r.label,
+                "elapsed": r.elapsed,
+                "text":    r.text,
+                "error":   r.error,
+                "tokens":  r.tokens,
+            }
+            for r in results
+        ]
+    }
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+
+
+# ── mem0 integration ─────────────────────────────────────────
+
+def mem0_save_run(prompt: str, results: list):
+    """Best-effort save of run summary to mem0 (agent_id=pocket-lab)."""
+    try:
+        mem0_env = "/root/.mem0_env"
+        key = os.environ.get("MEM0_API_KEY", "")
+        if not key and os.path.exists(mem0_env):
+            for line in open(mem0_env).read().splitlines():
+                if line.startswith("MEM0_API_KEY="):
+                    key = line.split("=", 1)[1].strip()
+                    break
+        if not key:
+            return
+
+        import urllib.request
+        summary = {
+            "event":   "PARALLEL_AI_RUN",
+            "ts":      datetime.now(timezone.utc).isoformat(),
+            "version": "v1.0",
+            "data": {
+                "prompt_snippet": prompt[:80],
+                "models": [
+                    {"model": r.key, "elapsed": r.elapsed,
+                     "ok": r.error is None, "chars": len(r.text)}
+                    for r in results
+                ]
+            }
+        }
+        payload = {
+            "messages": [{"role": "assistant",
+                           "content": json.dumps(summary, separators=(",", ":"))}],
+            "agent_id": "pocket-lab",
+            "metadata": {"event": "PARALLEL_AI_RUN",
+                         "ts": summary["ts"], "version": "v1.0"}
+        }
+        req = urllib.request.Request(
+            "https://api.mem0.ai/v1/memories/",
+            data=json.dumps(payload).encode(),
+            headers={"Authorization": f"Token {key}",
+                     "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            pass
+        print(f"{DIM}[mem0] PARALLEL_AI_RUN saved{RESET}")
+    except Exception:
+        pass  # Non-blocking — never fail the main run
+
+
+# ── CLI ──────────────────────────────────────────────────────
+
+def detect_available_models() -> list:
+    """Return model keys where the required API key is present."""
+    available = []
+    for key, cfg in MODELS.items():
+        env = cfg.get("env")
+        if env is None:
+            # Ollama — probe if server is up
+            try:
+                import urllib.request
+                base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+                urllib.request.urlopen(f"{base}/api/tags", timeout=2)
+                available.append(key)
+            except Exception:
+                pass
+        elif os.environ.get(env):
+            available.append(key)
+    return available
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Pocket Lab Parallel AI — fire a prompt at multiple models simultaneously",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""
+        Examples:
+          python3 parallel_ai.py "What is secp256k1?"
+          python3 parallel_ai.py --models claude,gpt4o "Explain ECDSA"
+          python3 parallel_ai.py --list-models
+          python3 parallel_ai.py --json "Summarize the Akwei case"
+          python3 parallel_ai.py --timeout 20 --models sonar "latest RF news"
+        """)
+    )
+    parser.add_argument("prompt",           nargs="?",  default=None,
+                        help="Prompt to send to all models")
+    parser.add_argument("--models", "-m",   default=None,
+                        help="Comma-separated model keys (default: all available)")
+    parser.add_argument("--system", "-s",   default="",
+                        help="System prompt (optional)")
+    parser.add_argument("--timeout", "-t",  type=int, default=45,
+                        help="Per-model timeout in seconds (default: 45)")
+    parser.add_argument("--json", "-j",     action="store_true",
+                        help="Output raw JSON instead of formatted display")
+    parser.add_argument("--list-models",    action="store_true",
+                        help="List all models and their availability")
+    parser.add_argument("--no-mem0",        action="store_true",
+                        help="Skip saving run to mem0")
+
+    args = parser.parse_args()
+
+    # ── --list-models ──────────────────────────────────────────
+    if args.list_models:
+        available = set(detect_available_models())
+        print(f"\n{BOLD}Pocket Lab — Available Models{RESET}\n")
+        for key, cfg in MODELS.items():
+            env   = cfg.get("env")
+            local = env is None
+            if key in available:
+                status = f"{GREEN}✓ ready{RESET}"
+            elif local:
+                status = f"{RED}✗ Ollama not running{RESET}"
+            else:
+                missing_env = env or ""
+                status = f"{RED}✗ {missing_env} not set{RESET}"
+            print(f"  {cfg['color']}{key:<16}{RESET} {cfg['label']:<30} {status}")
+        print()
+        sys.exit(0)
+
+    # ── Prompt required ────────────────────────────────────────
+    if not args.prompt:
+        # Read from stdin if piped
+        if not sys.stdin.isatty():
+            args.prompt = sys.stdin.read().strip()
+        else:
+            parser.print_help()
+            sys.exit(1)
+
+    # ── Resolve model list ─────────────────────────────────────
+    if args.models:
+        requested = [m.strip() for m in args.models.split(",")]
+        bad = [m for m in requested if m not in MODELS]
+        if bad:
+            print(f"{RED}Unknown models: {', '.join(bad)}{RESET}", file=sys.stderr)
+            print(f"Run with --list-models to see available options.", file=sys.stderr)
+            sys.exit(1)
+        model_keys = requested
+    else:
+        model_keys = detect_available_models()
+        if not model_keys:
+            print(f"{RED}No models available. Set at least one API key or start Ollama.{RESET}",
+                  file=sys.stderr)
+            print(f"  ANTHROPIC_API_KEY, OPENAI_API_KEY, PERPLEXITY_API_KEY, or run Ollama locally.",
+                  file=sys.stderr)
+            sys.exit(1)
+
+    # ── Banner ─────────────────────────────────────────────────
+    if not args.json:
+        print(f"\n{BOLD}Pocket Lab — Parallel AI{RESET}  "
+              f"{DIM}firing {len(model_keys)} model(s): "
+              f"{', '.join(model_keys)}{RESET}")
+
+    # ── Run ────────────────────────────────────────────────────
+    results = run_parallel(
+        prompt     = args.prompt,
+        model_keys = model_keys,
+        system     = args.system,
+        timeout    = args.timeout,
+        as_json    = args.json,
+    )
+
+    # ── Output ─────────────────────────────────────────────────
+    if args.json:
+        print_json(results, args.prompt)
+    else:
+        print_results(results, args.prompt)
+
+    # ── mem0 save ──────────────────────────────────────────────
+    if not args.no_mem0:
+        threading.Thread(
+            target=mem0_save_run,
+            args=(args.prompt, results),
+            daemon=True
+        ).start()
+        time.sleep(0.3)  # brief window for async save
+
+
+if __name__ == "__main__":
+    main()

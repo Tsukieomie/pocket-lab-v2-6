@@ -145,3 +145,17 @@ echo "║  ALL PORTABLE GATES PASSED                          ║"
 echo "║  Gate 1 + vault decrypt: on-device (iSH) only      ║"
 echo "║  Total: $(elapsed)ms"
 echo "╚══════════════════════════════════════════════════════╝"
+
+# ══════════════════════════════════════════════════════════
+# PARALLEL AI TOOL — post-gate availability check
+# ══════════════════════════════════════════════════════════
+echo ""
+echo "[Parallel AI] Checking model availability..."
+if [ -f "$WORK/parallel_ai.py" ]; then
+  python3 "$WORK/parallel_ai.py" --list-models
+  echo ""
+  echo "  Usage: python3 $WORK/parallel_ai.py \"your prompt\""
+  echo "  Or via pocket_lab.sh: sh $WORK/pocket_lab.sh ai \"your prompt\""
+else
+  echo "  [Parallel AI] parallel_ai.py not found — skipping"
+fi

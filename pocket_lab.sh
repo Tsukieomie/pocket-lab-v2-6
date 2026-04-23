@@ -14,6 +14,8 @@
 #   pocket_lab.sh tunnel status — show tunnel state
 #   pocket_lab.sh mem0 sync     — query + display all mem0 context
 #   pocket_lab.sh mem0 save     — save current state to mem0
+#   pocket_lab.sh ai "prompt"   — parallel AI query (all available models)
+#   pocket_lab.sh ai --list     — list available models + key status
 #   pocket_lab.sh rotate-key    — generate new approval keypair + push
 #   pocket_lab.sh boot          — full AUTO_START sequence
 #   pocket_lab.sh help          — show this message
@@ -164,6 +166,25 @@ case "$CMD" in
     mem0_log_rotation "$OLD_SHA" "$NEW_SHA" "manual-rotate" "operator-initiated" 2>/dev/null || true
     ;;
 
+  ai)
+    # Parallel AI tool — fire prompt at all available models simultaneously
+    AI_SCRIPT="$WORK/parallel_ai.py"
+    if [ ! -f "$AI_SCRIPT" ]; then
+      echo "[ai] parallel_ai.py not found at $AI_SCRIPT" >&2; exit 2
+    fi
+    if [ "$SUB" = "--list" ] || [ "$SUB" = "--list-models" ]; then
+      python3 "$AI_SCRIPT" --list-models
+    elif [ -z "$SUB" ]; then
+      echo "Usage: $0 ai \"your prompt\"" >&2
+      echo "       $0 ai --list" >&2
+      exit 1
+    else
+      # Pass remaining args through
+      shift
+      python3 "$AI_SCRIPT" "$@"
+    fi
+    ;;
+
   boot)
     exec sh "$WORK/AUTO_START.sh"
     ;;
@@ -182,6 +203,8 @@ case "$CMD" in
     echo "    tunnel status  Show tunnel state"
     echo "    mem0 sync      Query and display all mem0 context (bucketed)"
     echo "    mem0 save      Save current state snapshot to mem0"
+    echo "    ai \"prompt\"    Fire prompt at all available models in parallel"
+    echo "    ai --list      List models and API key status"
     echo "    rotate-key     Generate fresh approval keypair + rotation guidance"
     echo "    boot           Run full AUTO_START.sh boot sequence"
     echo "    help           Show this message"
