@@ -130,16 +130,23 @@ MODELS = {
         "fn":       "_run_ollama",
         "model_id": "mistral:latest",
     },
+    "gemma": {
+        "label":    "Gemma3-4b (Ollama/local)",
+        "env":      None,
+        "color":    BLUE,
+        "fn":       "_run_ollama",
+        "model_id": "gemma3:4b",
+    },
     "supermemory-mistral": {
         "label":    "Mistral (OpenRouter free)",
-        "env":      None,
+        "env":      "OPENROUTER_API_KEY",
         "color":    BLUE,
         "fn":       "_run_openrouter",
         "model_id": "mistralai/mistral-7b-instruct:free",
     },
     "supermemory-llama": {
         "label":    "Llama3 (OpenRouter free)",
-        "env":      None,
+        "env":      "OPENROUTER_API_KEY",
         "color":    BLUE,
         "fn":       "_run_openrouter",
         "model_id": "meta-llama/llama-3.2-3b-instruct:free",
@@ -295,9 +302,13 @@ def _run_supermemory(prompt: str, model_id: str, system: str,
 
 def _run_openrouter(prompt: str, model_id: str, system: str,
                     result: ModelResult, timeout: int):
-    """Call OpenRouter free-tier models — no API key required."""
+    """Call OpenRouter free-tier models — requires OPENROUTER_API_KEY."""
     try:
         import urllib.request
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not key:
+            result.error = "OPENROUTER_API_KEY not set"
+            return
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -307,7 +318,7 @@ def _run_openrouter(prompt: str, model_id: str, system: str,
             "https://openrouter.ai/api/v1/chat/completions",
             data=json.dumps(payload).encode(),
             headers={
-                "Authorization": "Bearer or-free",
+                "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": "https://github.com/Tsukieomie/pocket-lab-v2-6",
                 "X-Title": "Pocket Lab Parallel AI",
