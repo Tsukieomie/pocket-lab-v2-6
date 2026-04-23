@@ -1,5 +1,5 @@
-port=4382
+port=56138
 host=bore.pub
-ssh=ssh -p 4382 kenny@bore.pub
-updated=2026-04-23T09:41:58Z
+ssh=ssh -p 56138 kenny@bore.pub
+updated=2026-04-23T09:57:35Z
 machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
