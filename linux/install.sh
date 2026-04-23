@@ -43,6 +43,10 @@ else
 fi
 
 echo ""
+echo ">> Setting up mem0 credentials (~/.mem0_env)..."
+bash "$REPO_DIR/../setup_mem0_env.sh"
+
+echo ""
 echo ">> Done."
 echo ""
 echo "   To start the tunnel (no sudo needed):"
