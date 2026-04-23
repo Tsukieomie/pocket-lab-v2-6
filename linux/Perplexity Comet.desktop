@@ -2,8 +2,8 @@
 Version=1.0
 Type=Application
 Name=Perplexity Comet
-Comment=Perplexity Computer — Comet AI desktop
-Exec=/home/kenny/pocket-lab-v2-6/linux/launch-computer.sh
+Comment=Perplexity Computer — Comet AI
+Exec=/home/kenny/perplexity-linux-wrapper/launch-computer.sh
 Icon=/home/kenny/.local/share/icons/perplexity-connect.png
 Terminal=false
 Categories=Network;Utility;
