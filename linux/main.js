@@ -17,13 +17,14 @@ const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Geck
 
 // ── GPU / platform flags ──────────────────────────────────────────────────────
 app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform');
+app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('enable-accelerated-video-decode');
 app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,VaapiVideoEncoder,CanvasOopRasterization,ParallelDownloading');
 app.commandLine.appendSwitch('disable-software-rasterizer');
-app.commandLine.appendSwitch('ozone-platform', 'x11');
 app.commandLine.appendSwitch('disable-restore-session-state');
 app.commandLine.appendSwitch('no-restore-last-session');
 app.commandLine.appendSwitch('disable-session-crashed-bubble');

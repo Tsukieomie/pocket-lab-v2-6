@@ -1,5 +1,12 @@
+<<<<<<< HEAD
 port=
 host=bore.pub
 ssh=ssh -p  kenny@bore.pub
 updated=2026-04-23T06:58:44Z
+=======
+port=12706
+host=bore.pub
+ssh=ssh -p 12706 kenny@bore.pub
+updated=2026-04-23T07:22:20Z
+>>>>>>> f08f0eb6ae14c7518a0aa4a6700508d7b26a2577
 machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
