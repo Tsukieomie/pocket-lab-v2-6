@@ -34,12 +34,16 @@ _has_systemd_tunnel() {
     | grep -q '^bore-tunnel\.service'
 }
 _systemd_tunnel_port() {
-  # Extract remote_port from the bore-tunnel.service journal (most recent)
-  journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
-    | sed 's/\x1b\[[0-9;]*m//g' \
-    | grep -oE 'remote_port=[0-9]+' \
-    | tail -1 \
-    | cut -d= -f2
+  # Extract the live port from the bore-tunnel.service journal.
+  # bore v0.6.x logs: "listening at bore.pub:PORT"
+  # Fallback also matches legacy "remote_port=PORT" format.
+  local RAW
+  RAW=$(journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
+    | sed 's/\x1b\[[0-9;]*m//g')
+  # Primary: bore's actual output format
+  echo "$RAW" | grep -oE 'bore\.pub:[0-9]+' | tail -1 | cut -d: -f2 | grep -E '^[0-9]+$' \
+    || echo "$RAW" | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 | grep -E '^[0-9]+$' \
+    || true
 }
 
 
@@ -218,7 +222,10 @@ case "$CMD" in
     LIVE_PORT=""
     for i in 1 2 3 4 5 6 7 8 9 10; do
       sleep 1
-      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 || true)
+      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
+        | grep -oE 'bore\.pub:[0-9]+' | tail -1 | cut -d: -f2 | grep -E '^[0-9]+$' || \
+        sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
+        | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 | grep -E '^[0-9]+$' || true)
       [ -n "$LIVE_PORT" ] && break
     done
 
@@ -259,7 +266,10 @@ case "$CMD" in
       exit 0
     fi
     if pgrep -f "bore local 22" >/dev/null 2>&1; then
-      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -oE 'remote_port=[0-9]+' 2>/dev/null | tail -1 | cut -d= -f2 || echo "?")
+      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
+        | grep -oE 'bore\.pub:[0-9]+' | tail -1 | cut -d: -f2 | grep -E '^[0-9]+$' || \
+        sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
+        | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 | grep -E '^[0-9]+$' || echo "?")
       echo "[tunnel] RUNNING → $(_bore_host):$LIVE_PORT"
       echo "[tunnel] SSH: ssh -p $LIVE_PORT $(whoami)@$(_bore_host)"
     else
@@ -279,7 +289,10 @@ case "$CMD" in
         exit 1
       fi
     elif pgrep -f "bore local 22" >/dev/null 2>&1; then
-      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 || true)
+      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
+        | grep -oE 'bore\.pub:[0-9]+' | tail -1 | cut -d: -f2 | grep -E '^[0-9]+$' || \
+        sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
+        | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 | grep -E '^[0-9]+$' || true)
       if [ -n "$LIVE_PORT" ]; then
         echo "[tunnel] Syncing port $LIVE_PORT → bore-port.txt + GitHub..."
         push_port "$LIVE_PORT"
