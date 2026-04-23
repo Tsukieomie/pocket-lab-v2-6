@@ -131,17 +131,17 @@ MODELS = {
         "model_id": "mistral:latest",
     },
     "supermemory-mistral": {
-        "label":    "Mistral (via Supermemory Router)",
-        "env":      "SUPERMEMORY_API_KEY",
+        "label":    "Mistral (OpenRouter free)",
+        "env":      None,
         "color":    BLUE,
-        "fn":       "_run_supermemory",
+        "fn":       "_run_openrouter",
         "model_id": "mistralai/mistral-7b-instruct:free",
     },
     "supermemory-llama": {
-        "label":    "Llama3 (via Supermemory Router)",
-        "env":      "SUPERMEMORY_API_KEY",
+        "label":    "Llama3 (OpenRouter free)",
+        "env":      None,
         "color":    BLUE,
-        "fn":       "_run_supermemory",
+        "fn":       "_run_openrouter",
         "model_id": "meta-llama/llama-3.2-3b-instruct:free",
     },
 }
@@ -293,6 +293,35 @@ def _run_supermemory(prompt: str, model_id: str, system: str,
         result.error = str(e)
 
 
+def _run_openrouter(prompt: str, model_id: str, system: str,
+                    result: ModelResult, timeout: int):
+    """Call OpenRouter free-tier models — no API key required."""
+    try:
+        import urllib.request
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Authorization": "Bearer or-free",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/Tsukieomie/pocket-lab-v2-6",
+                "X-Title": "Pocket Lab Parallel AI",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        result.text   = data["choices"][0]["message"]["content"]
+        result.tokens = data.get("usage", {})
+    except Exception as e:
+        result.error = str(e)
+
+
 def _run_ollama(prompt: str, model_id: str, system: str,
                 result: ModelResult, timeout: int):
     try:
@@ -324,6 +353,7 @@ _RUNNERS = {
     "_run_perplexity":  _run_perplexity,
     "_run_ollama":      _run_ollama,
     "_run_supermemory": _run_supermemory,
+    "_run_openrouter":  _run_openrouter,
 }
 
 
@@ -663,9 +693,13 @@ def detect_available_models() -> list:
 
     for key, cfg in MODELS.items():
         env = cfg.get("env")
+        fn  = cfg.get("fn", "")
         if env is None:
-            # Ollama — check if the specific model is actually pulled
-            if cfg["model_id"] in ollama_models:
+            if fn == "_run_openrouter":
+                # OpenRouter free tier — always available, no key needed
+                available.append(key)
+            elif cfg["model_id"] in ollama_models:
+                # Ollama — check if the model is actually pulled
                 available.append(key)
         elif os.environ.get(env):
             available.append(key)
