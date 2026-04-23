@@ -1,0 +1,14 @@
+# ============================================================
+# Pocket Lab — inittab fragment for auto-respawning bore tunnel
+#
+# INSTALL: Append this line to /etc/inittab on iSH Alpine:
+#   echo 'tun:respawn:/root/perplexity/ish/bore-tunnel-respawn.sh' >> /etc/inittab
+#
+# iSH's busybox init will respawn bore-tunnel-respawn.sh
+# automatically whenever it exits (phone resumes, crash, etc.)
+#
+# Verify it's running:
+#   ps | grep bore
+#   cat /tmp/bore-tunnel-ish.log
+# ============================================================
+tun:respawn:/root/perplexity/ish/bore-tunnel-respawn.sh

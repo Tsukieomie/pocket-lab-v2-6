@@ -1,0 +1,19 @@
+# ============================================================
+# Pocket Lab — /etc/profile fragment for bore tunnel on iSH
+#
+# INSTALL: Append to /etc/profile on iSH Alpine:
+#   cat /root/perplexity/ish/profile-tunnel.fragment >> /etc/profile
+#
+# This fires bore-tunnel-respawn.sh in the background whenever
+# a new shell opens, with a lock guard to prevent duplicates.
+# Pairs with the inittab entry — inittab covers boot/resume,
+# profile covers manual shell opens when init hasn't run yet.
+# ============================================================
+
+# ── Pocket Lab: auto-start bore tunnel ───────────────────
+if [ -f /root/perplexity/ish/bore-tunnel-respawn.sh ]; then
+  # Only start if not already running
+  if ! pgrep -f bore-tunnel-respawn > /dev/null 2>&1; then
+    sh /root/perplexity/ish/bore-tunnel-respawn.sh &
+  fi
+fi

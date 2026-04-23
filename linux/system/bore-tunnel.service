@@ -1,0 +1,47 @@
+[Unit]
+Description=Pocket Lab — bore SSH tunnel
+Documentation=https://github.com/Tsukieomie/pocket-lab-v2-6
+# Start after network is up; restart on failure
+After=network-online.target
+Wants=network-online.target
+# Keep bore-port-watcher informed
+PartOf=bore-port-watcher.service
+
+[Service]
+Type=simple
+
+# ── Read config from ~/.bore_env ──────────────────────────
+# EnvironmentFile sets BORE_HOST, BORE_PORT, BORE_SECRET
+EnvironmentFile=-%h/.bore_env
+
+# ── Defaults (overridden by ~/.bore_env) ──────────────────
+Environment=BORE_HOST=bore.pub
+Environment=BORE_PORT=
+Environment=BORE_SECRET=
+
+# ── Resolve bore binary: prefer ~/.local/bin, then PATH ──
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+ExecStart=/bin/sh -c '\
+  BORE_BIN=$(command -v bore 2>/dev/null || echo ""); \
+  if [ -z "$BORE_BIN" ]; then \
+    echo "bore not found — run: bash %h/pocket-lab-v2-6/linux/tunnel.sh install-bore"; \
+    exit 1; \
+  fi; \
+  PORT_ARG=""; [ -n "${BORE_PORT}" ] && PORT_ARG="--port ${BORE_PORT}"; \
+  SECRET_ARG=""; [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"; \
+  exec "$BORE_BIN" local 22 --to "${BORE_HOST:-bore.pub}" $PORT_ARG $SECRET_ARG'
+
+# ── Restart policy ────────────────────────────────────────
+Restart=on-failure
+RestartSec=5
+# Exponential backoff cap at 60s
+RestartSteps=6
+RestartMaxDelaySec=60
+
+# ── Hardening ─────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

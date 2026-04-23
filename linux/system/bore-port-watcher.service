@@ -1,0 +1,38 @@
+[Unit]
+Description=Pocket Lab — bore port watcher (pushes port changes to GitHub)
+Documentation=https://github.com/Tsukieomie/pocket-lab-v2-6
+After=bore-tunnel.service
+BindsTo=bore-tunnel.service
+
+[Service]
+Type=simple
+
+EnvironmentFile=-%h/.bore_env
+Environment=BORE_HOST=bore.pub
+Environment=REPO_DIR=%h/pocket-lab-v2-6
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Watch the bore-tunnel journal for remote_port= announcements
+# and call tunnel.sh sync-port whenever a new port appears.
+# Polls every 3s — lightweight, no inotify needed.
+ExecStart=/bin/sh -c '\
+  LAST_PORT=""; \
+  echo "[watcher] started, watching bore-tunnel.service journal..."; \
+  while true; do \
+    LIVE=$(journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
+      | sed "s/\x1b\[[0-9;]*m//g" \
+      | grep -oE "remote_port=[0-9]+" | tail -1 | cut -d= -f2 || echo ""); \
+    if [ -n "$LIVE" ] && [ "$LIVE" != "$LAST_PORT" ]; then \
+      echo "[watcher] new port detected: $LIVE (was: ${LAST_PORT:-none})"; \
+      bash "${REPO_DIR}/linux/tunnel.sh" sync-port 2>&1 || true; \
+      LAST_PORT="$LIVE"; \
+    fi; \
+    sleep 3; \
+  done'
+
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
