@@ -1,17 +1,13 @@
 {
   "_comment": "Single source of truth for all cryptographic pins. Update here; scripts source this file.",
-  "_updated": "2026-04-21",
+  "_updated": "2026-04-23",
   "_updated_by": "Perplexity-Computer-v2.8",
-
   "pdf_sha256": "38c4871e12c75f12fc0c9603b92879e79454c87c6edf2a9adabfd00dff134134",
-
-  "approval_pubkey_sha256": "a5946ca3a316fcb8d55e02ab6cac7a124a216a4de9291632a0518d6258116420",
+  "approval_pubkey_sha256": "9e659ce3c4ab48d1afbd4a0e04e0c10c49badc88cdc4522071bbb773bcf4a95f",
   "approval_signature_algorithm": "ECDSA-secp256k1-SHA256",
   "approval_schema": "pocket_lab_signed_approval_v1",
   "approval_ttl_minutes": 5,
-
   "manifest_v2_6_sha256": "",
-
   "_key_history": [
     {
       "pubkey_sha256": "57e077cc200b550c391ed694716bcbebfbf4aa681abf790b40d7e1cf65779425",
@@ -23,6 +19,24 @@
       "pubkey_sha256": "8fdcd3a50486581e75a0d374af505fa4795a98b71aa31c01ad96f88d2c667489",
       "installed_at": "2026-04-20T16:15:24Z",
       "installed_by": "Perplexity-Computer-v2.7",
+      "status": "ROTATED",
+      "replaced_at": "2026-04-23T08:00:25Z",
+      "replaced_by": "Perplexity-Computer-v2.8",
+      "reason": "Superseded by a5946ca key from prior session"
+    },
+    {
+      "pubkey_sha256": "a5946ca3a316fcb8d55e02ab6cac7a124a216a4de9291632a0518d6258116420",
+      "installed_at": "2026-04-21T00:00:00Z",
+      "installed_by": "Perplexity-Computer-v2.8",
+      "status": "ROTATED",
+      "replaced_at": "2026-04-23T08:00:25Z",
+      "replaced_by": "Perplexity-Computer-v2.8",
+      "reason": "Routine session rotation \u2014 Path B direct signing"
+    },
+    {
+      "pubkey_sha256": "9e659ce3c4ab48d1afbd4a0e04e0c10c49badc88cdc4522071bbb773bcf4a95f",
+      "installed_at": "2026-04-23T08:00:25Z",
+      "installed_by": "Perplexity-Computer-v2.8",
       "status": "CURRENT"
     }
   ]

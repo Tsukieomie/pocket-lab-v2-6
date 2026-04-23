@@ -1,6 +1,6 @@
 {
-  "run_id": "perplexity-local-1776901211",
-  "timestamp_utc": "2026-04-22T23:40:11Z",
+  "run_id": "perplexity-local-1776931225",
+  "timestamp_utc": "2026-04-23T08:00:25Z",
   "runner": "Perplexity-Computer-v2.8",
   "repo": "Tsukieomie/pocket-lab-v2-6",
   "gates": {
@@ -12,9 +12,10 @@
         "ECDSA-secp256k1-SHA256 signature verified",
         "all required fields present",
         "schema: pocket_lab_signed_approval_v1",
-        "approved_by: Perplexity-Computer-v2.8"
+        "approved_by: Perplexity-Computer-v2.8",
+        "pubkey_sha256: 9e659ce3c4ab48d1afbd4a0e04e0c10c49badc88cdc4522071bbb773bcf4a95f"
       ],
-      "elapsed_ms": 144
+      "elapsed_ms": 153
     },
     "gate_3": {
       "status": "PASS",
@@ -23,10 +24,10 @@
         "tar_enc_sha256: 3201076f28cd6a6978586e18ce23c2c9851a73a0c6d357382fc44361758b9493",
         "manifest policy: fail_closed=true, pdf_self_execution=false, proceed_anyway_allowed=false"
       ],
-      "elapsed_ms": 49
+      "elapsed_ms": 52
     }
   },
-  "total_elapsed_ms": 148,
-  "gate_1_note": "on-device only (iSH) — not run in Perplexity cloud sandbox",
+  "total_elapsed_ms": 158,
+  "gate_1_note": "on-device only (iSH) \u2014 not run in Perplexity cloud sandbox",
   "result": "ALL_PORTABLE_GATES_PASSED"
 }
