@@ -306,7 +306,7 @@ _RUNNERS = {
 def run_parallel(prompt: str,
                  model_keys: list,
                  system: str = "",
-                 timeout: int = 45,
+                 timeout: int = 120,
                  as_json: bool = False) -> list:
     """
     Fire all model_keys simultaneously. Block until all finish or timeout.
@@ -624,8 +624,8 @@ def main():
                         help="Comma-separated model keys (default: all available)")
     parser.add_argument("--system", "-s",   default="",
                         help="System prompt (optional)")
-    parser.add_argument("--timeout", "-t",  type=int, default=45,
-                        help="Per-model timeout in seconds (default: 45)")
+    parser.add_argument("--timeout", "-t",  type=int, default=120,
+                        help="Per-model timeout in seconds (default: 120)")
     parser.add_argument("--json", "-j",     action="store_true",
                         help="Output raw JSON instead of formatted display")
     parser.add_argument("--list-models",    action="store_true",
