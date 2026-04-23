@@ -52,6 +52,40 @@ All cryptographic verification that doesn't require on-device secrets runs and m
 
 ---
 
+## Quick start (Linux laptop)
+
+Scripts are designed for iSH (which runs as root). On a normal Linux user account, use the Linux-specific wrappers — **no sudo required**.
+
+```sh
+# One-time setup (installs bore + tunnel script + ~/.bore_env template)
+bash ~/pocket-lab-v2-6/linux/install.sh
+
+# Start the tunnel (exposes local SSH port 22 via bore)
+pocket-tunnel.sh up
+# or without PATH setup:
+bash ~/pocket-lab-v2-6/linux/tunnel.sh up
+
+# Stop tunnel
+pocket-tunnel.sh down
+
+# Check tunnel status
+pocket-tunnel.sh status
+```
+
+Config lives in `~/.bore_env` (not `/root/.bore_env`):
+
+```sh
+# ~/.bore_env
+BORE_HOST=bore.pub       # or your self-hosted VPS IP
+BORE_PORT=               # leave blank to let bore assign dynamically
+BORE_SECRET=             # required for self-hosted bore server
+GH_TOKEN=                # GitHub PAT — enables bore-port.txt auto-update
+```
+
+After `tunnel.sh up`, the current port is written to `bore-port.txt` in this repo (if GH_TOKEN is set) so Perplexity Computer can reconnect automatically.
+
+---
+
 ## Quick start (iSH)
 
 ```sh
