@@ -39,7 +39,7 @@ ExecStartPost=/bin/sh -c '\
     sleep 1; \
     LIVE_PORT=$(journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
       | sed "s/\x1b\[[0-9;]*m//g" \
-      | grep -oE "bore\.pub:[0-9]+" | tail -1 | cut -d: -f2 | grep -E "^[0-9]+$" \
+      | grep "listening at" | grep -oE ":[0-9]+" | tail -1 | tr -d ":" | grep -E "^[0-9]+$" \
       || journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
       | sed "s/\x1b\[[0-9;]*m//g" \
       | grep -oE "remote_port=[0-9]+" | tail -1 | cut -d= -f2 | grep -E "^[0-9]+$" \

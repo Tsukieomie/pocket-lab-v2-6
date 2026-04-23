@@ -43,14 +43,14 @@ _has_systemd_tunnel() {
     | grep -q '^bore-tunnel\.service'
 }
 _systemd_tunnel_port() {
-  # Extract the live port from the bore-tunnel.service journal.
-  # bore v0.6.x logs: "listening at bore.pub:PORT"
-  # Fallback also matches legacy "remote_port=PORT" format.
+  # Extract the assigned tunnel port from the bore-tunnel.service journal.
+  # bore v0.6.x logs on success: "listening at bore.pub:PORT"
+  # Must NOT match "connecting to bore.pub:7835" (the control port).
   local RAW
   RAW=$(journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
     | sed 's/\x1b\[[0-9;]*m//g')
-  # Primary: bore's actual output format
-  echo "$RAW" | grep -oE 'bore\.pub:[0-9]+' | tail -1 | cut -d: -f2 | grep -E '^[0-9]+$' \
+  # Match only lines containing "listening at" then extract the port
+  echo "$RAW" | grep 'listening at' | grep -oE ':[0-9]+' | tail -1 | tr -d ':' | grep -E '^[0-9]+$' \
     || echo "$RAW" | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 | grep -E '^[0-9]+$' \
     || true
 }
