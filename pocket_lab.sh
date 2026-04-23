@@ -2,10 +2,10 @@
 # ============================================================
 # pocket_lab.sh — Pocket Security Lab v2.8 Unified Entrypoint
 #
-# Single command to control the entire lab.
+# Works on iSH (iPhone) AND Linux VM — same command everywhere.
 #
 # Usage:
-#   pocket_lab.sh open          — full 3-gate open (safe, verified)
+#   pocket_lab.sh open          — load mem0 context + open lab
 #   pocket_lab.sh lock          — securely wipe plaintext from /tmp
 #   pocket_lab.sh status        — full system status snapshot
 #   pocket_lab.sh verify        — run all integrity checks without opening
@@ -23,9 +23,23 @@
 set -eu
 
 WORK="${POCKET_LAB_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-SEC="/root/.pocket_lab_secure"
 PINS="$WORK/schema/pins.json"
-BORE_ENV="/root/.bore_env"
+
+# Platform-aware paths
+_is_ish() {
+  [ -f /proc/ish ] && return 0
+  uname -a 2>/dev/null | grep -qi "ish" && return 0
+  [ "$(uname -s)" = "Linux" ] && [ -d /root/.pocket_lab_secure ] && return 0
+  return 1
+}
+
+if _is_ish; then
+  SEC="/root/.pocket_lab_secure"
+  BORE_ENV="/root/.bore_env"
+else
+  SEC="${HOME}/.pocket_lab_secure"
+  BORE_ENV="${HOME}/.bore_env"
+fi
 
 # Load mem0 library
 if [ -f "$WORK/mem0.sh" ]; then
@@ -54,11 +68,8 @@ SUB="${2:-}"
 case "$CMD" in
 
   open)
-    echo "╔══════════════════════════════════════════════════════╗"
-    echo "║           POCKET LAB — OPENING (v2.8)               ║"
-    echo "╚══════════════════════════════════════════════════════╝"
-    mem0_save_event "VAULT_OPEN_ATTEMPT" '{"gate":"starting"}' false 2>/dev/null || true
-    exec "$WORK/OPEN_POCKET_LAB_V2_6.sh"
+    # Unified loader — works on iSH and Linux, loads mem0 first
+    exec sh "$WORK/load_pocket_lab.sh" open
     ;;
 
   lock)
@@ -191,7 +202,7 @@ case "$CMD" in
 
   help|--help|-h|"")
     echo ""
-    echo "  Pocket Security Lab v2.8 — Unified Entrypoint"
+    echo "  Pocket Security Lab v2.8 — Unified Entrypoint (iSH + Linux)"
     echo ""
     echo "  Commands:"
     echo "    open           Full 3-gate open (Gate1: integrity, Gate2: signed approval, Gate3: verify)"
