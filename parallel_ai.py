@@ -35,6 +35,31 @@ import textwrap
 from datetime import datetime, timezone
 from typing import Optional
 
+# ── Auto-load .mem0_env ───────────────────────────────────────
+# Sources /root/.mem0_env (or ~/.mem0_env) at startup so
+# SUPERMEMORY_API_KEY and MEM0_API_KEY are always available
+# without needing to manually `source` the file.
+def _load_mem0_env():
+    for env_file in ["/root/.mem0_env", os.path.expanduser("~/.mem0_env")]:
+        if os.path.exists(env_file):
+            try:
+                with open(env_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        key, _, val = line.partition("=")
+                        key = key.strip()
+                        val = val.strip()
+                        # Only set if not already in environment
+                        if key and val and key not in os.environ:
+                            os.environ[key] = val
+            except Exception:
+                pass
+            break
+
+_load_mem0_env()
+
 # ── ANSI colors ──────────────────────────────────────────────
 RESET  = "\033[0m"
 BOLD   = "\033[1m"
