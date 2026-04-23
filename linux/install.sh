@@ -29,17 +29,28 @@ gio set ~/Desktop/"Perplexity Connect.desktop" metadata::trusted true 2>/dev/nul
 
 echo ""
 echo ">> Setting up ~/.ssh/authorized_keys for Perplexity Computer tunnel access..."
-mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
-PERPLEXITY_PUBKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFJfaR3o9eJlfwwZoneTL9rAdE7oY3U50uqsZ7eRM9JS perplexity-computer-tunnel"
-if grep -qF "perplexity-computer-tunnel" "${HOME}/.ssh/authorized_keys" 2>/dev/null; then
-  echo "   Perplexity Computer pubkey already in authorized_keys — skipping"
-else
-  echo "$PERPLEXITY_PUBKEY" >> "${HOME}/.ssh/authorized_keys"
-  chmod 600 "${HOME}/.ssh/authorized_keys"
-  echo "   Added Perplexity Computer pubkey to ~/.ssh/authorized_keys"
-fi
 # NOTE: Always use ~/.ssh (not /root/.ssh) on a standard Linux account.
 # /root/.ssh requires sudo and is not where sshd looks for your user.
+mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
+touch "${HOME}/.ssh/authorized_keys" && chmod 600 "${HOME}/.ssh/authorized_keys"
+
+# Canonical Perplexity Computer tunnel key — ONE entry, replaced not appended.
+# The key blob is the source of truth; the comment is normalised to
+# 'perplexity-computer-tunnel' so grep always finds it on re-runs.
+PERPLEXITY_KEY_BLOB="AAAAC3NzaC1lZDI1NTE5AAAAIFJfaR3o9eJlfwwZoneTL9rAdE7oY3U50uqsZ7eRM9JS"
+PERPLEXITY_PUBKEY="ssh-ed25519 ${PERPLEXITY_KEY_BLOB} perplexity-computer-tunnel"
+
+if grep -qF "${PERPLEXITY_KEY_BLOB}" "${HOME}/.ssh/authorized_keys" 2>/dev/null; then
+  echo "   Perplexity Computer pubkey already present — skipping"
+else
+  echo "${PERPLEXITY_PUBKEY}" >> "${HOME}/.ssh/authorized_keys"
+  echo "   Added Perplexity Computer pubkey to ~/.ssh/authorized_keys"
+fi
+
+# Deduplicate on every install run so keys never accumulate.
+if [ -f "$REPO_DIR/linux/dedup-authorized-keys.sh" ]; then
+  bash "$REPO_DIR/linux/dedup-authorized-keys.sh"
+fi
 
 echo ">> Checking ~/.bore_env ..."
 if [ ! -f "${HOME}/.bore_env" ]; then
