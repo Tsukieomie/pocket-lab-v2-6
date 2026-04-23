@@ -1,50 +1,35 @@
 [Unit]
 Description=Pocket Lab — bore SSH tunnel
 Documentation=https://github.com/Tsukieomie/pocket-lab-v2-6
-# Start after network is up; restart on failure
 After=network-online.target
 Wants=network-online.target
-# Keep bore-port-watcher informed
-PartOf=bore-port-watcher.service
 
 [Service]
 Type=simple
 
-# ── Read config from ~/.bore_env ──────────────────────────
-# EnvironmentFile sets BORE_HOST, BORE_PORT, BORE_SECRET
+# Read config from ~/.bore_env (BORE_HOST, BORE_PORT, BORE_SECRET)
 EnvironmentFile=-%h/.bore_env
-
-# ── Defaults (overridden by ~/.bore_env) ──────────────────
 Environment=BORE_HOST=bore.pub
 Environment=BORE_PORT=
 Environment=BORE_SECRET=
-
-# ── Resolve bore binary: prefer ~/.local/bin, then PATH ──
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
-# ── Pre-start: verify bore binary exists ─────────────────
+# Verify bore binary exists before starting
 ExecStartPre=/bin/sh -c '\
-  if ! command -v bore >/dev/null 2>&1; then \
-    echo "[bore-tunnel] ERROR: bore not found in PATH. Run: bash %h/pocket-lab-v2-6/linux/tunnel.sh install-bore"; \
+  command -v bore >/dev/null 2>&1 || { \
+    echo "[bore-tunnel] bore not found — run: bash %h/pocket-lab-v2-6/linux/tunnel.sh install-bore"; \
     exit 1; \
-  fi'
+  }'
 
 ExecStart=/bin/sh -c '\
-  BORE_BIN=$(command -v bore 2>/dev/null || echo ""); \
-  if [ -z "$BORE_BIN" ]; then \
-    echo "bore not found — run: bash %h/pocket-lab-v2-6/linux/tunnel.sh install-bore"; \
-    exit 1; \
-  fi; \
   PORT_ARG=""; [ -n "${BORE_PORT}" ] && PORT_ARG="--port ${BORE_PORT}"; \
   SECRET_ARG=""; [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"; \
-  echo "[bore-tunnel] Starting: bore local 22 --to ${BORE_HOST:-bore.pub} $PORT_ARG ..."; \
-  exec "$BORE_BIN" local 22 --to "${BORE_HOST:-bore.pub}" $PORT_ARG $SECRET_ARG'
+  echo "[bore-tunnel] Starting bore local 22 --to ${BORE_HOST} $PORT_ARG"; \
+  exec bore local 22 --to "${BORE_HOST}" $PORT_ARG $SECRET_ARG'
 
-# ── Post-start: push port immediately once bore reports it ─
-# Polls up to 15s so bore-port.txt is always current on startup.
+# Poll up to 15s for remote_port, then push bore-port.txt immediately
 ExecStartPost=/bin/sh -c '\
-  REPO_DIR="%h/pocket-lab-v2-6"; \
-  TUNNEL_SH="$REPO_DIR/linux/tunnel.sh"; \
+  TUNNEL_SH="%h/pocket-lab-v2-6/linux/tunnel.sh"; \
   LIVE_PORT=""; \
   for i in $(seq 1 15); do \
     sleep 1; \
@@ -57,31 +42,23 @@ ExecStartPost=/bin/sh -c '\
     echo "[bore-tunnel] Port ready: $LIVE_PORT — syncing..."; \
     bash "$TUNNEL_SH" sync-port 2>&1 || true; \
   else \
-    echo "[bore-tunnel] WARNING: bore did not report a port within 15s"; \
+    echo "[bore-tunnel] WARNING: no port reported within 15s"; \
   fi'
 
-# ── Stop: clean up bore-port.txt to signal tunnel is down ─
+# Mark bore-port.txt as DOWN on stop so consumers know the tunnel is gone
 ExecStopPost=/bin/sh -c '\
-  REPO_DIR="%h/pocket-lab-v2-6"; \
-  if [ -f "$REPO_DIR/bore-port.txt" ]; then \
-    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ); \
-    sed -i "s/^port=.*/port=DOWN/" "$REPO_DIR/bore-port.txt"; \
-    sed -i "s/^updated=.*/updated=${TIMESTAMP}/" "$REPO_DIR/bore-port.txt"; \
-    echo "[bore-tunnel] bore-port.txt marked DOWN"; \
-  fi'
+  PORT_FILE="%h/pocket-lab-v2-6/bore-port.txt"; \
+  [ -f "$PORT_FILE" ] || exit 0; \
+  sed -i "s/^port=.*/port=DOWN/" "$PORT_FILE"; \
+  sed -i "s/^updated=.*/updated=$(date -u +%Y-%m-%dT%H:%M:%SZ)/" "$PORT_FILE"; \
+  echo "[bore-tunnel] bore-port.txt marked DOWN"'
 
-# ── Restart policy: exponential backoff ──────────────────
+# Exponential backoff: 5s → up to 60s cap over 6 steps
 Restart=on-failure
 RestartSec=5
 RestartSteps=6
 RestartMaxDelaySec=60
 
-# ── Watchdog: if bore silently hangs, restart it ─────────
-# bore should produce output quickly; 120s with no activity = dead
-WatchdogSec=120
-NotifyAccess=none
-
-# ── Hardening ─────────────────────────────────────────────
 NoNewPrivileges=true
 PrivateTmp=true
 

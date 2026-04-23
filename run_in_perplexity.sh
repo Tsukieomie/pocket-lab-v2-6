@@ -2,15 +2,13 @@
 # ============================================================
 # run_in_perplexity.sh — Pocket Security Lab v2.8
 #
-# What Perplexity Computer executes when you say "run it".
+# Runs the portable subset of the three-gate chain inside the
+# Perplexity Computer cloud sandbox:
 #
-# Runs the portable subset of the three-gate chain that can
-# execute in the Perplexity Computer cloud sandbox:
-#
-#   Gate 2  — secp256k1 keypair generation, approval JSON
-#             build + sign + field-validate (Path B)
 #   Gate 3  — v2.4 PDF SHA-256, tar.enc SHA-256,
 #             v2.6 manifest policy verification
+#   Gate 2  — secp256k1 keypair generation, approval JSON
+#             build + sign + field-validate (Path B)
 #   Bore    — autonomous tunnel status check + port sync
 #
 # Gate 1 (startup-integrity manifest) and vault decrypt
@@ -148,7 +146,7 @@ echo "║  Total: $(elapsed)ms"
 echo "╚══════════════════════════════════════════════════════╝"
 
 # ══════════════════════════════════════════════════════════
-# BORE TUNNEL — autonomous status + port sync
+# BORE — autonomous tunnel status + port sync
 # ══════════════════════════════════════════════════════════
 echo ""
 echo "[Bore] Checking tunnel status..."
@@ -157,24 +155,15 @@ BORE_ENV="${HOME}/.bore_env"
 BORE_PORT_FILE="$WORK/bore-port.txt"
 TUNNEL_SH="$WORK/linux/tunnel.sh"
 
-# ── Read config ──────────────────────────────────────────
 _bore_host() { grep '^BORE_HOST=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo "bore.pub"; }
-_bore_port() { grep '^BORE_PORT=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo ""; }
-_bore_secret() { grep '^BORE_SECRET=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo ""; }
 
-# ── Install bore if missing ───────────────────────────────
+# ── Auto-install bore if missing ─────────────────────────
 if ! command -v bore >/dev/null 2>&1 && [ ! -x "${HOME}/.local/bin/bore" ]; then
-  echo "[Bore] bore binary not found — installing..."
-  if [ -f "$TUNNEL_SH" ]; then
-    bash "$TUNNEL_SH" install-bore
-  else
-    echo "[Bore] WARNING: linux/tunnel.sh not found — cannot auto-install bore"
-  fi
+  echo "[Bore] bore not found — installing..."
+  bash "$TUNNEL_SH" install-bore
 fi
 
-BORE_BIN=$(command -v bore 2>/dev/null || echo "${HOME}/.local/bin/bore")
-
-# ── Check if systemd user service is managing the tunnel ─
+# ── Detect tunnel mode ───────────────────────────────────
 _has_systemd() {
   command -v systemctl >/dev/null 2>&1 && \
   systemctl --user list-unit-files bore-tunnel.service 2>/dev/null | grep -q '^bore-tunnel\.service'
@@ -186,7 +175,7 @@ _systemd_live_port() {
     | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 || echo ""
 }
 
-TUNNEL_MODE="none"
+TUNNEL_MODE="down"
 LIVE_PORT=""
 
 if _has_systemd && systemctl --user is-active --quiet bore-tunnel.service 2>/dev/null; then
@@ -195,60 +184,38 @@ if _has_systemd && systemctl --user is-active --quiet bore-tunnel.service 2>/dev
   echo "[Bore] Managed by systemd (bore-tunnel.service)"
 elif pgrep -f 'bore local 22' >/dev/null 2>&1; then
   TUNNEL_MODE="manual"
-  LOG="/tmp/bore-tunnel-linux.log"
-  LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" 2>/dev/null \
+  LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/bore-tunnel-linux.log 2>/dev/null \
     | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 || echo "")
-  echo "[Bore] Tunnel running (manual/background process)"
+  echo "[Bore] Tunnel running (manual)"
 else
-  TUNNEL_MODE="down"
   echo "[Bore] Tunnel is DOWN"
 fi
 
-# ── If tunnel is up: verify and sync port ────────────────
+# ── Tunnel up: verify and sync port ─────────────────────
 if [ "$TUNNEL_MODE" != "down" ] && [ -n "$LIVE_PORT" ]; then
   BORE_HOST=$(_bore_host)
   echo "[Bore] Live port: $LIVE_PORT  host: $BORE_HOST"
   echo "[Bore] SSH: ssh -p $LIVE_PORT $(whoami 2>/dev/null || echo user)@$BORE_HOST"
 
-  # Compare live port vs bore-port.txt
   STORED_PORT=$(grep '^port=' "$BORE_PORT_FILE" 2>/dev/null | cut -d= -f2 || echo "")
   if [ "$STORED_PORT" != "$LIVE_PORT" ]; then
-    echo "[Bore] bore-port.txt has port=$STORED_PORT — out of sync, pushing $LIVE_PORT..."
-    if [ -f "$TUNNEL_SH" ]; then
-      bash "$TUNNEL_SH" sync-port 2>&1 || echo "[Bore] sync-port failed (non-fatal)"
-    else
-      # Inline minimal push — write bore-port.txt locally
-      TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      cat > "$BORE_PORT_FILE" << PORTFILE
-port=${LIVE_PORT}
-host=${BORE_HOST}
-ssh=ssh -p ${LIVE_PORT} $(whoami 2>/dev/null || echo user)@${BORE_HOST}
-updated=${TIMESTAMP}
-machine=$(hostname 2>/dev/null || echo unknown)
-PORTFILE
-      echo "[Bore] bore-port.txt updated locally (linux/tunnel.sh not available for GitHub push)"
-    fi
+    echo "[Bore] bore-port.txt out of sync (stored=$STORED_PORT) — pushing $LIVE_PORT..."
+    bash "$TUNNEL_SH" sync-port 2>&1 || echo "[Bore] sync-port failed (non-fatal)"
   else
     echo "[Bore] bore-port.txt in sync ✓ (port=$LIVE_PORT)"
   fi
+
 elif [ "$TUNNEL_MODE" != "down" ] && [ -z "$LIVE_PORT" ]; then
-  echo "[Bore] Tunnel process is running but port not yet visible (still connecting?)"
-  echo "[Bore] Check: bash $TUNNEL_SH status"
+  echo "[Bore] Process running but port not visible yet (still connecting?)"
+  echo "[Bore] Run: bash $TUNNEL_SH status"
 fi
 
-# ── If tunnel is down: report and suggest how to start ───
+# ── Tunnel down: print start instructions ───────────────
 if [ "$TUNNEL_MODE" = "down" ]; then
-  echo "[Bore] To start tunnel on your Linux machine:"
-  if [ -f "$TUNNEL_SH" ]; then
-    echo "  bash $TUNNEL_SH up"
-  else
-    echo "  bash ~/pocket-lab-v2-6/linux/tunnel.sh up"
-  fi
+  echo "[Bore] Start tunnel:  bash $TUNNEL_SH up"
   if _has_systemd; then
-    echo "[Bore] Or via systemd:"
-    echo "  systemctl --user start bore-tunnel.service"
+    echo "[Bore] Or via systemd: systemctl --user start bore-tunnel.service"
   fi
 fi
 
 echo "[Bore] DONE — t=$(elapsed)ms"
-echo ""

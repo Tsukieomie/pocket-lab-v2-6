@@ -12,38 +12,31 @@ Environment=BORE_HOST=bore.pub
 Environment=REPO_DIR=%h/pocket-lab-v2-6
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
-# ── Watcher: polls bore journal every 2s (was 3s), retries push on failure ──
-# Detects remote_port= changes and calls sync-port immediately.
-# Retries failed GitHub pushes up to 3 times with a 5s backoff.
+# Poll bore-tunnel journal every 2s.
+# On port change: call sync-port, retry up to 3 times with 5s backoff.
+# On port loss: reset state so the next reconnect is detected cleanly.
 ExecStart=/bin/sh -c '\
   TUNNEL_SH="${REPO_DIR}/linux/tunnel.sh"; \
   LAST_PORT=""; \
-  PUSH_FAILURES=0; \
-  MAX_PUSH_FAILURES=3; \
-  echo "[watcher] started — polling bore-tunnel.service journal every 2s..."; \
+  echo "[watcher] started — watching bore-tunnel.service for port changes"; \
   while true; do \
     LIVE=$(journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
       | sed "s/\x1b\[[0-9;]*m//g" \
       | grep -oE "remote_port=[0-9]+" | tail -1 | cut -d= -f2 || echo ""); \
     if [ -n "$LIVE" ] && [ "$LIVE" != "$LAST_PORT" ]; then \
-      echo "[watcher] port change detected: ${LAST_PORT:-none} → $LIVE"; \
-      PUSH_FAILURES=0; \
+      echo "[watcher] port change: ${LAST_PORT:-none} → $LIVE"; \
       PUSH_OK=false; \
       for _try in 1 2 3; do \
         bash "$TUNNEL_SH" sync-port 2>&1 && PUSH_OK=true && break; \
-        PUSH_FAILURES=$((PUSH_FAILURES + 1)); \
         echo "[watcher] sync-port attempt $_try failed — retrying in 5s..."; \
         sleep 5; \
       done; \
-      if [ "$PUSH_OK" = true ]; then \
-        echo "[watcher] port $LIVE synced OK"; \
-        LAST_PORT="$LIVE"; \
-      else \
-        echo "[watcher] WARNING: sync-port failed after $MAX_PUSH_FAILURES attempts (bore-port.txt local only)"; \
-        LAST_PORT="$LIVE"; \
-      fi; \
+      [ "$PUSH_OK" = true ] \
+        && echo "[watcher] port $LIVE synced OK" \
+        || echo "[watcher] WARNING: sync-port failed after 3 attempts (bore-port.txt local only)"; \
+      LAST_PORT="$LIVE"; \
     elif [ -z "$LIVE" ] && [ -n "$LAST_PORT" ]; then \
-      echo "[watcher] bore lost port (tunnel may be reconnecting)"; \
+      echo "[watcher] port lost — tunnel reconnecting"; \
       LAST_PORT=""; \
     fi; \
     sleep 2; \
