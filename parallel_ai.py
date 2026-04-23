@@ -630,6 +630,8 @@ def main():
                         help="List all models and their availability")
     parser.add_argument("--no-mem0",        action="store_true",
                         help="Skip saving run to mem0")
+    parser.add_argument("--no-supermemory",  action="store_true",
+                        help="Skip Supermemory context injection and save")
 
     args = parser.parse_args()
 
