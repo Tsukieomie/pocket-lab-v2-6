@@ -10,6 +10,7 @@
 #   OPENAI_API_KEY     → GPT-4o / GPT-4o-mini
 #   PERPLEXITY_API_KEY → Sonar (pplx-70b-online)
 #   OLLAMA_URL         → Dolphin3 / any local model (default: http://localhost:11434)
+#   SUPERMEMORY_API_KEY → Routes to OpenRouter free models via Supermemory Memory Router
 #
 # Usage:
 #   python3 parallel_ai.py "your prompt here"
@@ -103,6 +104,20 @@ MODELS = {
         "color":    YELLOW,
         "fn":       "_run_ollama",
         "model_id": "mistral:latest",
+    },
+    "supermemory-mistral": {
+        "label":    "Mistral (via Supermemory Router)",
+        "env":      "SUPERMEMORY_API_KEY",
+        "color":    BLUE,
+        "fn":       "_run_supermemory",
+        "model_id": "mistralai/mistral-7b-instruct:free",
+    },
+    "supermemory-llama": {
+        "label":    "Llama3 (via Supermemory Router)",
+        "env":      "SUPERMEMORY_API_KEY",
+        "color":    BLUE,
+        "fn":       "_run_supermemory",
+        "model_id": "meta-llama/llama-3.2-3b-instruct:free",
     },
 }
 
@@ -215,6 +230,43 @@ def _run_perplexity(prompt: str, model_id: str, system: str,
         result.error = str(e)
 
 
+def _run_supermemory(prompt: str, model_id: str, system: str,
+                     result: ModelResult, timeout: int):
+    """Route through Supermemory Memory Router → OpenRouter free models."""
+    try:
+        import urllib.request
+        sm_key = os.environ.get("SUPERMEMORY_API_KEY", "")
+        if not sm_key:
+            result.error = "SUPERMEMORY_API_KEY not set"
+            return
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
+        # Supermemory Memory Router proxies to OpenRouter
+        # Provider key = empty string (OpenRouter free tier requires no key for free models)
+        req = urllib.request.Request(
+            "https://api.supermemory.ai/v3/https://openrouter.ai/api/v1/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Authorization": "Bearer free",
+                "Content-Type": "application/json",
+                "x-supermemory-api-key": sm_key,
+                "x-sm-conversation-id": "pocket-lab",
+                "HTTP-Referer": "https://github.com/Tsukieomie/pocket-lab-v2-6",
+                "X-Title": "Pocket Lab Parallel AI",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        result.text   = data["choices"][0]["message"]["content"]
+        result.tokens = data.get("usage", {})
+    except Exception as e:
+        result.error = str(e)
+
+
 def _run_ollama(prompt: str, model_id: str, system: str,
                 result: ModelResult, timeout: int):
     try:
@@ -241,10 +293,11 @@ def _run_ollama(prompt: str, model_id: str, system: str,
 
 
 _RUNNERS = {
-    "_run_anthropic":  _run_anthropic,
-    "_run_openai":     _run_openai,
-    "_run_perplexity": _run_perplexity,
-    "_run_ollama":     _run_ollama,
+    "_run_anthropic":   _run_anthropic,
+    "_run_openai":      _run_openai,
+    "_run_perplexity":  _run_perplexity,
+    "_run_ollama":      _run_ollama,
+    "_run_supermemory": _run_supermemory,
 }
 
 
