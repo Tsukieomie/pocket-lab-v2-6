@@ -43,37 +43,70 @@ _systemd_tunnel_port() {
 }
 
 
-push_port_to_github() {
+# ── push_port: write bore-port.txt locally + push to GitHub atomically ──────
+# Called immediately after bore reports its remote_port — no watcher needed.
+# Token sources (checked in order):
+#   1. GH_TOKEN in ~/.bore_env
+#   2. ~/.bore-github-token
+push_port() {
   local PORT="$1"
-  TOKEN_FILE="${HOME}/.bore-github-token"
-  [ -f "$TOKEN_FILE" ] || return 0
-  GH_TOKEN=$(cat "$TOKEN_FILE")
-  REPO="Tsukieomie/pocket-lab-v2-6"
-  FILE="bore-port.txt"
+  local BORE_HOST_VAL
+  BORE_HOST_VAL=$(_bore_host)
+  local TIMESTAMP
   TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-  CONTENT="port=${PORT}
-host=$(BORE_HOST=$(_bore_host) && echo "$BORE_HOST")
-ssh=ssh -p ${PORT} $(whoami)@$(_bore_host)
+
+  # ── 1. Write local bore-port.txt immediately (always succeeds) ──
+  cat > "$REPO_DIR/bore-port.txt" << PORTFILE
+port=${PORT}
+host=${BORE_HOST_VAL}
+ssh=ssh -p ${PORT} $(whoami)@${BORE_HOST_VAL}
 updated=${TIMESTAMP}
-machine=$(hostname -s)
-"
-  ENCODED=$(printf '%s' "$CONTENT" | base64 -w 0)
-  SHA=$(curl -sf -H "Authorization: token ${GH_TOKEN}" \
+machine=$(hostname)
+PORTFILE
+  echo "[tunnel] bore-port.txt updated locally → port=${PORT}"
+
+  # ── 2. Resolve GitHub token ──
+  local GH_TOKEN=""
+  GH_TOKEN=$(grep '^GH_TOKEN=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || true)
+  if [ -z "$GH_TOKEN" ] && [ -f "${HOME}/.bore-github-token" ]; then
+    GH_TOKEN=$(cat "${HOME}/.bore-github-token")
+  fi
+  if [ -z "$GH_TOKEN" ]; then
+    echo "[tunnel] No GH_TOKEN found — skipping GitHub push (bore-port.txt local only)"
+    echo "[tunnel] Set GH_TOKEN in ~/.bore_env to enable automatic GitHub sync"
+    return 0
+  fi
+
+  # ── 3. Push to GitHub atomically (get current SHA first) ──
+  local REPO="Tsukieomie/pocket-lab-v2-6"
+  local FILE="bore-port.txt"
+  local ENCODED
+  ENCODED=$(base64 -w 0 < "$REPO_DIR/bore-port.txt" 2>/dev/null || base64 < "$REPO_DIR/bore-port.txt")
+  local SHA
+  SHA=$(curl -sf --max-time 8 \
+    -H "Authorization: token ${GH_TOKEN}" \
+    -H "Accept: application/vnd.github.v3+json" \
     "https://api.github.com/repos/${REPO}/contents/${FILE}" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || echo "")
+
+  local PAYLOAD
   if [ -n "$SHA" ]; then
-    PAYLOAD="{\"message\":\"bore port ${PORT} @ $(date '+%Y-%m-%d %H:%M')\",\"content\":\"${ENCODED}\",\"sha\":\"${SHA}\"}"
+    PAYLOAD="{\"message\":\"bore port ${PORT} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\",\"sha\":\"${SHA}\"}"
   else
-    PAYLOAD="{\"message\":\"bore port ${PORT}\",\"content\":\"${ENCODED}\"}"
+    PAYLOAD="{\"message\":\"bore port ${PORT} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\"}"
   fi
-  curl -sf -X PUT \
+
+  curl -sf --max-time 10 -X PUT \
     -H "Authorization: token ${GH_TOKEN}" \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" \
     "https://api.github.com/repos/${REPO}/contents/${FILE}" > /dev/null \
-    && echo "[tunnel] Port $PORT pushed to GitHub (bore-port.txt updated)" \
-    || echo "[tunnel] GitHub push failed (non-fatal)"
+    && echo "[tunnel] GitHub bore-port.txt synced ✓ (port=${PORT})" \
+    || echo "[tunnel] GitHub push failed (non-fatal) — local bore-port.txt is current"
 }
+
+# Keep old name as alias for backwards compat
+push_port_to_github() { push_port "$1"; }
 
 install_bore() {
   echo "[tunnel] Installing bore binary to ~/.local/bin/ ..."
@@ -106,12 +139,12 @@ case "$CMD" in
     ;;
 
   up)
-    # v2.8.1: defer to systemd service if installed
+    # v2.8.2: systemd path now pushes port atomically — no watcher needed
     if _has_systemd_tunnel; then
       systemctl --user start bore-tunnel.service 2>&1 || true
-      # Give bore a moment to register remote_port on first start
+      # Poll up to 15s for bore to report its remote_port
       LIVE_PORT=""
-      for i in 1 2 3 4 5; do
+      for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
         LIVE_PORT=$(_systemd_tunnel_port)
         [ -n "$LIVE_PORT" ] && break
         sleep 1
@@ -119,7 +152,8 @@ case "$CMD" in
       if [ -n "$LIVE_PORT" ]; then
         echo "[tunnel] UP (systemd) → bore.pub:$LIVE_PORT"
         echo "[tunnel] SSH: ssh -p $LIVE_PORT $(whoami)@bore.pub"
-        echo "[tunnel] (bore-port-watcher.service pushes bore-port.txt to GitHub)"
+        # Push port immediately — don't rely on bore-port-watcher.service
+        push_port "$LIVE_PORT"
         exit 0
       else
         echo "[tunnel] systemd bore-tunnel.service did not report a port; falling back to manual"
@@ -162,19 +196,10 @@ case "$CMD" in
     done
 
     if pgrep -f "bore local 22" >/dev/null 2>&1 && [ -n "$LIVE_PORT" ]; then
-      [ -z "$LIVE_PORT" ] && LIVE_PORT="$BORE_PORT"
       echo "[tunnel] UP → $BORE_HOST:$LIVE_PORT"
       echo "[tunnel] SSH command: ssh -p $LIVE_PORT $(whoami)@$BORE_HOST"
-      # Update bore-port.txt in GitHub
-      push_port_to_github "$LIVE_PORT"
-      # Update local bore-port.txt in repo
-      cat > "$REPO_DIR/bore-port.txt" << PORTFILE
-port=${LIVE_PORT}
-host=${BORE_HOST}
-ssh=ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}
-updated=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-machine=$(hostname -s)
-PORTFILE
+      # Write local file + push to GitHub in one step
+      push_port "$LIVE_PORT"
     else
       echo "[tunnel] FAILED — check $LOG"
       cat "$LOG"
@@ -190,12 +215,20 @@ PORTFILE
     ;;
 
   status)
-    # v2.8.1: prefer systemd-reported port if service is active
+    # v2.8.2: prefer systemd-reported port if service is active
     if _has_systemd_tunnel && systemctl --user is-active --quiet bore-tunnel.service; then
       LIVE_PORT=$(_systemd_tunnel_port)
       [ -z "$LIVE_PORT" ] && LIVE_PORT="?"
       echo "[tunnel] RUNNING (systemd) → bore.pub:$LIVE_PORT"
       echo "[tunnel] SSH: ssh -p $LIVE_PORT $(whoami)@bore.pub"
+      # Show whether bore-port.txt matches live port
+      LOCAL_PORT=$(grep '^port=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "unknown")
+      if [ "$LOCAL_PORT" != "$LIVE_PORT" ] && [ "$LIVE_PORT" != "?" ]; then
+        echo "[tunnel] WARNING: bore-port.txt has port=$LOCAL_PORT but live port is $LIVE_PORT"
+        echo "[tunnel] Run: bash $0 sync-port   to fix"
+      else
+        echo "[tunnel] bore-port.txt in sync ✓"
+      fi
       exit 0
     fi
     if pgrep -f "bore local 22" >/dev/null 2>&1; then
@@ -207,8 +240,34 @@ PORTFILE
     fi
     ;;
 
+  sync-port)
+    # Manually re-read live bore port and push — useful if watcher missed it
+    if _has_systemd_tunnel && systemctl --user is-active --quiet bore-tunnel.service; then
+      LIVE_PORT=$(_systemd_tunnel_port)
+      if [ -n "$LIVE_PORT" ]; then
+        echo "[tunnel] Syncing port $LIVE_PORT → bore-port.txt + GitHub..."
+        push_port "$LIVE_PORT"
+      else
+        echo "[tunnel] Could not read live port from systemd journal"
+        exit 1
+      fi
+    elif pgrep -f "bore local 22" >/dev/null 2>&1; then
+      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 || true)
+      if [ -n "$LIVE_PORT" ]; then
+        echo "[tunnel] Syncing port $LIVE_PORT → bore-port.txt + GitHub..."
+        push_port "$LIVE_PORT"
+      else
+        echo "[tunnel] bore is running but port not found in log"
+        exit 1
+      fi
+    else
+      echo "[tunnel] Tunnel is not running"
+      exit 1
+    fi
+    ;;
+
   *)
-    echo "Usage: $0 [up|down|status|install-bore]"
+    echo "Usage: $0 [up|down|status|sync-port|install-bore]"
     exit 1
     ;;
 esac
