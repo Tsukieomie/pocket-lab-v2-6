@@ -107,7 +107,7 @@ mem0_save_event() {
   fi
   printf '%s' "$PAYLOAD" > "$LAST_STATE_FILE"
 
-  curl -sf --max-time 5 -X POST "$MEM0_API/memories/" \
+  curl -sf --max-time 10 -X POST "$MEM0_API/memories/" \
     -H "Authorization: Token $MEM0_API_KEY" \
     -H "Content-Type: application/json" \
     -d "{\"messages\":[{\"role\":\"assistant\",\"content\":\"$MSG\"}],\"agent_id\":\"$MEM0_AGENT\",\"metadata\":{\"event\":\"$EVENT_TYPE\",\"ts\":\"$TS\",\"version\":\"$MEM0_VERSION\"}}" \
@@ -128,7 +128,7 @@ mem0_save() {
   fi
   printf '%s' "$MSG" > "$LAST_STATE_FILE"
   TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  curl -sf --max-time 5 -X POST "$MEM0_API/memories/" \
+  curl -sf --max-time 10 -X POST "$MEM0_API/memories/" \
     -H "Authorization: Token $MEM0_API_KEY" \
     -H "Content-Type: application/json" \
     -d "{\"messages\":[{\"role\":\"assistant\",\"content\":\"$MSG\"}],\"agent_id\":\"$MEM0_AGENT\",\"metadata\":{\"ts\":\"$TS\",\"version\":\"$MEM0_VERSION\"}}" \
