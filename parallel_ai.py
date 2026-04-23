@@ -117,14 +117,14 @@ MODELS = {
         "model_id": "llama-3.1-sonar-large-128k-online",
     },
     "dolphin": {
-        "label":    "Dolphin3 (Ollama/local)",
+        "label":    "Dolphin3-3b — compressor (Ollama/local)",
         "env":      None,
         "color":    YELLOW,
         "fn":       "_run_ollama",
         "model_id": "nchapman/dolphin3.0-qwen2.5:latest",
     },
     "mistral": {
-        "label":    "Mistral (Ollama/local)",
+        "label":    "Mistral-7b — primary local (Ollama/local)",
         "env":      None,
         "color":    YELLOW,
         "fn":       "_run_ollama",
@@ -375,7 +375,7 @@ def dolphin_compress(prompt: str, timeout: int = 60) -> str:
         import urllib.request
         base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
         payload = {
-            "model": "cognitivecomputations/dolphin3.0-qwen2.5:7b",
+            "model": "nchapman/dolphin3.0-qwen2.5:latest",
             "system": system,
             "prompt": prompt,
             "stream": False,
@@ -406,16 +406,11 @@ def run_parallel(prompt: str,
                  timeout: int = 120,
                  as_json: bool = False) -> list:
     """
-    Fire models simultaneously where possible.
-    Local Ollama models run sequentially to avoid resource contention.
-    Cloud/OpenRouter models run in parallel threads.
+    Fire all model_keys simultaneously. Block until all finish or timeout.
     Returns list of ModelResult.
     """
     results = {k: ModelResult(k) for k in model_keys}
-
-    # Split into local (sequential) and cloud (parallel)
-    local_keys  = [k for k in model_keys if MODELS[k]["fn"] == "_run_ollama"]
-    cloud_keys  = [k for k in model_keys if MODELS[k]["fn"] != "_run_ollama"]
+    threads = []
 
     def worker(key):
         cfg    = MODELS[key]
@@ -426,30 +421,16 @@ def run_parallel(prompt: str,
         result.elapsed = round(time.time() - t0, 2)
         result.done    = True
 
-    # Start cloud models in parallel threads
-    threads = []
-    for key in cloud_keys:
+    for key in model_keys:
         t = threading.Thread(target=worker, args=(key,), daemon=True)
         threads.append(t)
         t.start()
 
-    # Run local Ollama models sequentially
-    for key in local_keys:
-        if not as_json:
-            print(f"{DIM}[ollama] running {key} (sequential)...{RESET}", file=__import__('sys').stderr)
-        worker(key)
-
-    # Wait for cloud threads
-    for t in threads:
-        t.join(timeout=timeout + 2)
-
-    # Mark any still-running cloud models as done
-    for key in cloud_keys:
-        if not results[key].done:
-            results[key].done = True
-
     if not as_json:
         _print_progress(results, model_keys, timeout)
+    else:
+        for t in threads:
+            t.join(timeout=timeout + 2)
 
     return [results[k] for k in model_keys]
 
