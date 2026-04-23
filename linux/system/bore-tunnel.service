@@ -24,8 +24,12 @@ ExecStartPre=/bin/sh -c '\
 ExecStart=/bin/sh -c '\
   PORT_ARG=""; [ -n "${BORE_PORT}" ] && PORT_ARG="--port ${BORE_PORT}"; \
   SECRET_ARG=""; [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"; \
-  echo "[bore-tunnel] Starting bore local 22 --to ${BORE_HOST} $PORT_ARG"; \
-  exec bore local 22 --to "${BORE_HOST}" $PORT_ARG $SECRET_ARG'
+  HOST_IP=$(getent ahostsv4 "${BORE_HOST}" 2>/dev/null | awk "/STREAM/{print \$1; exit}" \
+    || python3 -c "import socket; print(socket.getaddrinfo(\"${BORE_HOST}\",None,socket.AF_INET)[0][4][0])" 2>/dev/null \
+    || echo "${BORE_HOST}"); \
+  [ "$HOST_IP" != "${BORE_HOST}" ] && echo "[bore-tunnel] Resolved ${BORE_HOST} -> $HOST_IP (IPv4)"; \
+  echo "[bore-tunnel] Starting bore local 22 --to $HOST_IP $PORT_ARG"; \
+  exec bore local 22 --to "$HOST_IP" $PORT_ARG $SECRET_ARG'
 
 # Poll up to 15s for remote_port, then push bore-port.txt immediately
 ExecStartPost=/bin/sh -c '\

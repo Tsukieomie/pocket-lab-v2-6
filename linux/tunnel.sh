@@ -24,6 +24,15 @@ LOG="/tmp/bore-tunnel-linux.log"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 _bore_host() { grep '^BORE_HOST=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo "bore.pub"; }
+# Resolve hostname to IPv4 only — avoids IPv6 timeout on networks that block it.
+# Falls back to the hostname if resolution fails.
+_bore_host_ipv4() {
+  local HOST
+  HOST=$(_bore_host)
+  getent ahostsv4 "$HOST" 2>/dev/null | awk '/STREAM/{print $1; exit}' \
+    || python3 -c "import socket; print(socket.getaddrinfo('$HOST',None,socket.AF_INET)[0][4][0])" 2>/dev/null \
+    || echo "$HOST"
+}
 _bore_port() { grep '^BORE_PORT=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo ""; }
 _bore_secret() { grep '^BORE_SECRET=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo ""; }
 # ── Systemd user service integration (v2.8.1) ───────────────
@@ -203,6 +212,7 @@ case "$CMD" in
     fi
 
     BORE_HOST=$(_bore_host)
+    BORE_HOST_IP=$(_bore_host_ipv4)
     BORE_PORT=$(_bore_port)
     BORE_SECRET=$(_bore_secret)
 
@@ -211,11 +221,12 @@ case "$CMD" in
     PORT_ARG=""
     [ -n "$BORE_PORT" ] && PORT_ARG="--port $BORE_PORT"
 
-    echo "[tunnel] Starting: bore local 22 --to $BORE_HOST $PORT_ARG ..."
+    [ "$BORE_HOST_IP" != "$BORE_HOST" ] && echo "[tunnel] Resolved $BORE_HOST → $BORE_HOST_IP (IPv4)"
+    echo "[tunnel] Starting: bore local 22 --to $BORE_HOST_IP $PORT_ARG ..."
     # Truncate log so we only read the current run's remote_port
     : > "$LOG"
     # shellcheck disable=SC2086
-    "$BORE_BIN" local 22 --to "$BORE_HOST" $PORT_ARG $SECRET_ARG \
+    "$BORE_BIN" local 22 --to "$BORE_HOST_IP" $PORT_ARG $SECRET_ARG \
       > "$LOG" 2>&1 &
 
     # Poll for the remote_port up to ~10s instead of a fixed sleep 3
