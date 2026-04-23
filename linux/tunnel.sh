@@ -96,13 +96,40 @@ PORTFILE
     PAYLOAD="{\"message\":\"bore port ${PORT} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\"}"
   fi
 
+  local PUSH_OK=false
   curl -sf --max-time 10 -X PUT \
     -H "Authorization: token ${GH_TOKEN}" \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" \
     "https://api.github.com/repos/${REPO}/contents/${FILE}" > /dev/null \
-    && echo "[tunnel] GitHub bore-port.txt synced ✓ (port=${PORT})" \
+    && PUSH_OK=true \
     || echo "[tunnel] GitHub push failed (non-fatal) — local bore-port.txt is current"
+
+  if [ "$PUSH_OK" = false ]; then
+    return 0
+  fi
+
+  # ── 4. Post-push verification — read back from GitHub raw CDN ──
+  # Retry up to 5s to allow CDN propagation.
+  local VERIFIED=false
+  local REMOTE_PORT=""
+  for _i in 1 2 3 4 5; do
+    REMOTE_PORT=$(curl -sf --max-time 6 \
+      "https://raw.githubusercontent.com/${REPO}/main/${FILE}?$(date +%s)" \
+      | grep '^port=' | cut -d= -f2 || echo "")
+    if [ "$REMOTE_PORT" = "$PORT" ]; then
+      VERIFIED=true
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$VERIFIED" = true ]; then
+    echo "[tunnel] GitHub bore-port.txt verified ✓ (port=${PORT} confirmed on raw CDN)"
+  else
+    echo "[tunnel] WARNING: push succeeded but raw CDN returned port=${REMOTE_PORT:-<empty>} (expected ${PORT})"
+    echo "[tunnel] CDN propagation may be delayed — local bore-port.txt is authoritative"
+  fi
 }
 
 # Keep old name as alias for backwards compat
