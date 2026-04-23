@@ -26,6 +26,22 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 _bore_host() { grep '^BORE_HOST=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo "bore.pub"; }
 _bore_port() { grep '^BORE_PORT=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo ""; }
 _bore_secret() { grep '^BORE_SECRET=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo ""; }
+# ── Systemd user service integration (v2.8.1) ───────────────
+# If bore-tunnel.service exists as a user unit, defer to it: the service owns
+# the tunnel and bore-port-watcher.service pushes port changes to GitHub.
+_has_systemd_tunnel() {
+  systemctl --user list-unit-files bore-tunnel.service 2>/dev/null \
+    | grep -q '^bore-tunnel\.service'
+}
+_systemd_tunnel_port() {
+  # Extract remote_port from the bore-tunnel.service journal (most recent)
+  journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | grep -oE 'remote_port=[0-9]+' \
+    | tail -1 \
+    | cut -d= -f2
+}
+
 
 push_port_to_github() {
   local PORT="$1"
@@ -90,6 +106,26 @@ case "$CMD" in
     ;;
 
   up)
+    # v2.8.1: defer to systemd service if installed
+    if _has_systemd_tunnel; then
+      systemctl --user start bore-tunnel.service 2>&1 || true
+      # Give bore a moment to register remote_port on first start
+      LIVE_PORT=""
+      for i in 1 2 3 4 5; do
+        LIVE_PORT=$(_systemd_tunnel_port)
+        [ -n "$LIVE_PORT" ] && break
+        sleep 1
+      done
+      if [ -n "$LIVE_PORT" ]; then
+        echo "[tunnel] UP (systemd) → bore.pub:$LIVE_PORT"
+        echo "[tunnel] SSH: ssh -p $LIVE_PORT $(whoami)@bore.pub"
+        echo "[tunnel] (bore-port-watcher.service pushes bore-port.txt to GitHub)"
+        exit 0
+      else
+        echo "[tunnel] systemd bore-tunnel.service did not report a port; falling back to manual"
+      fi
+    fi
+
     # Check bore binary
     if ! command -v bore >/dev/null 2>&1 && [ ! -x "$BORE_BIN" ]; then
       echo "[tunnel] bore not found — installing..."
@@ -147,10 +183,21 @@ PORTFILE
     ;;
 
   down)
-    pkill -f "bore local 22 " 2>/dev/null && echo "[tunnel] Stopped." || echo "[tunnel] Not running."
+    if _has_systemd_tunnel && systemctl --user is-active --quiet bore-tunnel.service; then
+      systemctl --user stop bore-tunnel.service && echo "[tunnel] Stopped (systemd)." && exit 0
+    fi
+    pkill -f "bore local 22" 2>/dev/null && echo "[tunnel] Stopped." || echo "[tunnel] Not running."
     ;;
 
   status)
+    # v2.8.1: prefer systemd-reported port if service is active
+    if _has_systemd_tunnel && systemctl --user is-active --quiet bore-tunnel.service; then
+      LIVE_PORT=$(_systemd_tunnel_port)
+      [ -z "$LIVE_PORT" ] && LIVE_PORT="?"
+      echo "[tunnel] RUNNING (systemd) → bore.pub:$LIVE_PORT"
+      echo "[tunnel] SSH: ssh -p $LIVE_PORT $(whoami)@bore.pub"
+      exit 0
+    fi
     if pgrep -f "bore local 22" >/dev/null 2>&1; then
       LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -oE 'remote_port=[0-9]+' 2>/dev/null | tail -1 | cut -d= -f2 || echo "?")
       echo "[tunnel] RUNNING → $(_bore_host):$LIVE_PORT"
