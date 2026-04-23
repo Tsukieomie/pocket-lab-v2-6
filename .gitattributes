@@ -1,0 +1,8 @@
+# bore-port.txt is a live runtime file rewritten by tunnel.sh on every
+# tunnel restart. Merging it from remote is never correct — the local
+# (live) value always wins.
+#
+# merge=ours: on git pull/merge, always keep the local version.
+# This prevents "local changes would be overwritten" aborts without
+# needing skip-worktree to be set manually on each machine.
+bore-port.txt merge=ours

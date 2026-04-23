@@ -7,10 +7,14 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$REPO_DIR/.." && pwd)"
 
 # bore-port.txt is a live runtime file updated by the tunnel on every restart.
-# Mark it skip-worktree so git pull never conflicts with local changes.
+# Two-layer protection against git pull conflicts:
+#   1. skip-worktree — shields local changes from merge detection
+#   2. merge=ours driver (via .gitattributes) — keeps local value on merge
+# The 'ours' merge driver must be registered in git config to take effect.
 if git -C "$REPO_ROOT" ls-files --error-unmatch bore-port.txt >/dev/null 2>&1; then
   git -C "$REPO_ROOT" update-index --skip-worktree bore-port.txt 2>/dev/null || true
 fi
+git -C "$REPO_ROOT" config merge.ours.driver true 2>/dev/null || true
 
 echo ">> Installing xclip (needed for clipboard paste)..."
 sudo apt-get install -y -q xclip
