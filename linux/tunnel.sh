@@ -121,7 +121,7 @@ case "$CMD" in
     LIVE_PORT=""
     for i in 1 2 3 4 5 6 7 8 9 10; do
       sleep 1
-      LIVE_PORT=$(grep -oE 'remote_port=[0-9]+' "$LOG" | tail -1 | cut -d= -f2 || true)
+      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 || true)
       [ -n "$LIVE_PORT" ] && break
     done
 
@@ -152,7 +152,7 @@ PORTFILE
 
   status)
     if pgrep -f "bore local 22" >/dev/null 2>&1; then
-      LIVE_PORT=$(grep -oE 'remote_port=[0-9]+' "$LOG" 2>/dev/null | tail -1 | cut -d= -f2 || echo "?")
+      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep -oE 'remote_port=[0-9]+' 2>/dev/null | tail -1 | cut -d= -f2 || echo "?")
       echo "[tunnel] RUNNING → $(_bore_host):$LIVE_PORT"
       echo "[tunnel] SSH: ssh -p $LIVE_PORT $(whoami)@$(_bore_host)"
     else
