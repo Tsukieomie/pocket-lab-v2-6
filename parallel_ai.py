@@ -376,7 +376,10 @@ def _print_progress(results: dict, model_keys: list, timeout: int):
 # ── Output formatters ────────────────────────────────────────
 
 def print_results(results: list, prompt: str):
-    width = min(os.get_terminal_size().columns, 100) if hasattr(os, 'get_terminal_size') else 80
+    try:
+        width = min(os.get_terminal_size().columns, 100)
+    except OSError:
+        width = 80
     sep   = "─" * width
 
     print(f"\n{BOLD}╔{'═'*(width-2)}╗{RESET}")
