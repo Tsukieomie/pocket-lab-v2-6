@@ -452,14 +452,16 @@ def supermemory_fetch_context(prompt: str) -> str:
         key = _sm_key()
         if not key:
             return ""
-        params = urllib.parse.urlencode({"q": prompt[:200], "limit": 5})
+        payload = json.dumps({"q": prompt[:200], "limit": 5}).encode()
         req = urllib.request.Request(
-            f"{SM_API}/search?{params}",
+            f"{SM_API}/search",
+            data=payload,
             headers={
                 "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
                 "x-sm-user-id": SM_USER,
             },
-            method="GET",
+            method="POST",
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.load(resp)
@@ -520,8 +522,8 @@ def supermemory_save_run(prompt: str, results: list):
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=8) as resp:
-            pass
-        print(f"{DIM}[supermemory] run saved to memory graph{RESET}")
+            resp_data = json.load(resp)
+        print(f"{DIM}[supermemory] run saved — id: {resp_data.get('id','?')}{RESET}")
     except Exception as e:
         print(f"{DIM}[supermemory] save skipped: {e}{RESET}")
 
