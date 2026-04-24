@@ -1,0 +1,5 @@
+request=bore-port
+from=perplexity-computer
+timestamp=2026-04-24T21:30:36Z
+action=please run: bash ~/pocket-lab-v2-6/linux/tunnel.sh sync-port
+
