@@ -37,12 +37,16 @@ BORE_CTRL_PORT="${BORE_CTRL_PORT:-2222}"
 [ -f "$BORE_ENV" ] && set +eu && . "$BORE_ENV" && set -eu || true
 
 # ── bore binary resolution ───────────────────────────────────
-# Picks the right custom binary based on BORE_CTRL_PORT, then falls
-# back to generic bore installs.
+# _bore_bin [PORT] — returns best binary for given ctrl port.
+# PORT defaults to BORE_CTRL_PORT, then 2222.
 _bore_bin() {
-  # Prefer the custom binary matching the configured control port
-  case "${BORE_CTRL_PORT:-2222}" in
+  local PORT="${1:-${BORE_CTRL_PORT:-2222}}"
+  case "$PORT" in
     8443)
+      [ -x "${REPO_DIR}/bore-custom-8443" ] && echo "${REPO_DIR}/bore-custom-8443" && return 0
+      ;;
+    443)
+      # 443 uses the same bore binary as 8443 if available, otherwise generic
       [ -x "${REPO_DIR}/bore-custom-8443" ] && echo "${REPO_DIR}/bore-custom-8443" && return 0
       ;;
     2222|*)
@@ -57,6 +61,36 @@ _bore_bin() {
     [ -x "$P" ] && echo "$P" && return 0
   done
   command -v bore 2>/dev/null || echo ""
+}
+
+# ── _bore_try: attempt one bore connection on a given ctrl port ─
+# Usage: _bore_try <BORE_IP> <CTRL_PORT> <SECRET_ARG> <LOG_FILE>
+# Starts bore in background, polls 10s for "listening at", kills on
+# failure. Prints the remote port on success, empty string on failure.
+_bore_try() {
+  local BORE_IP="$1" CTRL_PORT="$2" SECRET_ARG="$3" TRY_LOG="$4"
+  local BIN
+  BIN=$(_bore_bin "$CTRL_PORT")
+  [ -z "$BIN" ] && return 1
+  # Kill any existing bore process for a clean try
+  pkill -f "bore.*local.*22" 2>/dev/null || true
+  sleep 0.5
+  : > "$TRY_LOG"
+  # shellcheck disable=SC2086
+  "$BIN" local 22 --to "$BORE_IP" $SECRET_ARG >> "$TRY_LOG" 2>&1 &
+  local TRY_PID=$!
+  local PORT=""
+  for i in $(seq 1 10); do
+    sleep 1
+    PORT=$(grep "listening at" "$TRY_LOG" 2>/dev/null \
+      | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
+    [ -n "$PORT" ] && echo "$PORT" && return 0
+    # Bail early if process already died
+    kill -0 "$TRY_PID" 2>/dev/null || break
+  done
+  # Failed — kill the background process
+  kill "$TRY_PID" 2>/dev/null || true
+  return 1
 }
 
 # ── cloudflared binary resolution (legacy fallback) ─────────
@@ -296,42 +330,56 @@ case "$CMD" in
       fi
     fi
 
-    # ── Direct bore invocation ──
-    BORE_BIN=$(_bore_bin)
-    if [ -z "$BORE_BIN" ]; then
+    # ── Direct bore invocation with port fallback ──
+    # Ensure at least one bore binary is available
+    if [ -z "$(_bore_bin 2222)" ] && [ -z "$(_bore_bin 8443)" ]; then
       echo "[tunnel] bore not found — installing..."
       install_bore
-      BORE_BIN="${HOME}/.local/bin/bore"
     fi
 
-    # Resolve IP (bore needs IP, not hostname, on some builds)
+    # Resolve IP
     BORE_IP=$(getent ahostsv4 "${BORE_HOST}" 2>/dev/null | awk '/STREAM/{print $1; exit}' \
       || python3 -c "import socket; print(socket.getaddrinfo('${BORE_HOST}',None,socket.AF_INET)[0][4][0])" 2>/dev/null \
       || echo "${BORE_HOST}")
 
-    echo "[tunnel] Starting bore tunnel → ${BORE_HOST} (${BORE_IP}) ctrl=${BORE_CTRL_PORT} ..."
-    : > "$LOG"
     SECRET_ARG=""
     [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"
-    # shellcheck disable=SC2086
-    "$BORE_BIN" local 22 --to "$BORE_IP" $SECRET_ARG >> "$LOG" 2>&1 &
 
-    # Poll up to 30s for "listening at :<port>"
-    LIVE_PORT=""
-    for i in $(seq 1 30); do
-      sleep 1
-      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
-        | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
-      [ -n "$LIVE_PORT" ] && break
+    # Try control ports in order: configured port first, then 2222 → 8443 → 443
+    # Build ordered list (configured port first, deduplicated)
+    CONFIGURED_PORT="${BORE_CTRL_PORT:-2222}"
+    PORT_LIST="${CONFIGURED_PORT}"
+    for P in 2222 8443 443; do
+      [ "$P" != "$CONFIGURED_PORT" ] && PORT_LIST="${PORT_LIST} ${P}"
     done
 
-    if pgrep -f "bore local 22" >/dev/null 2>&1 && [ -n "$LIVE_PORT" ]; then
-      echo "[tunnel] UP → ${BORE_HOST}:${LIVE_PORT}"
+    LIVE_PORT=""
+    USED_PORT=""
+    for TRY_PORT in $PORT_LIST; do
+      # Quick TCP probe before attempting bore (saves 10s timeout)
+      if ! timeout 3 bash -c "echo >/dev/tcp/${BORE_IP}/${TRY_PORT}" 2>/dev/null; then
+        echo "[tunnel] ctrl port ${TRY_PORT} unreachable — skipping"
+        continue
+      fi
+      echo "[tunnel] Trying bore → ${BORE_HOST} ctrl=${TRY_PORT} ..."
+      LIVE_PORT=$(_bore_try "$BORE_IP" "$TRY_PORT" "$SECRET_ARG" "$LOG") && USED_PORT="$TRY_PORT" && break || true
+      echo "[tunnel] ctrl port ${TRY_PORT} failed — trying next"
+    done
+
+    if [ -n "$LIVE_PORT" ]; then
+      # Persist the working port so future runs start with it
+      if [ "$USED_PORT" != "${BORE_CTRL_PORT:-2222}" ]; then
+        grep -v '^BORE_CTRL_PORT=' "$BORE_ENV" > /tmp/_bore_env_tmp 2>/dev/null || true
+        echo "BORE_CTRL_PORT=${USED_PORT}" >> /tmp/_bore_env_tmp
+        mv /tmp/_bore_env_tmp "$BORE_ENV"
+        echo "[tunnel] Saved BORE_CTRL_PORT=${USED_PORT} → ${BORE_ENV}"
+      fi
+      echo "[tunnel] UP → ${BORE_HOST}:${LIVE_PORT} (ctrl=${USED_PORT})"
       echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
       push_port "$LIVE_PORT"
     else
-      echo "[tunnel] FAILED — check $LOG"
-      tail -30 "$LOG"
+      echo "[tunnel] FAILED on all ports (2222, 8443, 443) — check $LOG"
+      tail -20 "$LOG"
       exit 1
     fi
     ;;
@@ -615,19 +663,25 @@ case "$CMD" in
           sleep 1
         done
       fi
-      # Fallback to direct if systemd didn't work
-      if [ -z "${NEW_PORT:-}" ] && [ -n "$BORE_BIN" ]; then
+      # Fallback to direct with port auto-fallback if systemd didn't work
+      if [ -z "${NEW_PORT:-}" ]; then
         BORE_IP=$(getent ahostsv4 "${BORE_HOST}" 2>/dev/null | awk '/STREAM/{print $1; exit}' \
           || echo "${BORE_HOST}")
-        SECRET_ARG=""
-        [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"
-        : > "$LOG"
-        # shellcheck disable=SC2086
-        "$BORE_BIN" local 22 --to "$BORE_IP" $SECRET_ARG >> "$LOG" 2>&1 &
-        for i in $(seq 1 20); do
-          sleep 1
-          NEW_PORT=$(grep "listening at" "$LOG" 2>/dev/null | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
-          [ -n "$NEW_PORT" ] && break
+        D_SECRET_ARG=""
+        [ -n "${BORE_SECRET}" ] && D_SECRET_ARG="--secret ${BORE_SECRET}"
+        D_CONFIGURED="${BORE_CTRL_PORT:-2222}"
+        D_PORT_LIST="${D_CONFIGURED}"
+        for P in 2222 8443 443; do
+          [ "$P" != "$D_CONFIGURED" ] && D_PORT_LIST="${D_PORT_LIST} ${P}"
+        done
+        for TRY_PORT in $D_PORT_LIST; do
+          timeout 3 bash -c "echo >/dev/tcp/${BORE_IP}/${TRY_PORT}" 2>/dev/null || continue
+          echo "  → Trying bore ctrl=${TRY_PORT} ..."
+          NEW_PORT=$(_bore_try "$BORE_IP" "$TRY_PORT" "$D_SECRET_ARG" "$LOG") && \
+            grep -v '^BORE_CTRL_PORT=' "$BORE_ENV" > /tmp/_bore_env_tmp 2>/dev/null || true && \
+            echo "BORE_CTRL_PORT=${TRY_PORT}" >> /tmp/_bore_env_tmp && \
+            mv /tmp/_bore_env_tmp "$BORE_ENV" || true
+          [ -n "$NEW_PORT" ] && break || true
         done
       fi
       if [ -n "${NEW_PORT:-}" ]; then
