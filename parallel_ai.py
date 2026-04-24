@@ -9,7 +9,11 @@
 #   ANTHROPIC_API_KEY  → Claude claude-opus-4-5 / claude-sonnet-4-5
 #   OPENAI_API_KEY     → GPT-4o / GPT-4o-mini
 #   PERPLEXITY_API_KEY → Sonar (pplx-70b-online)
-#   OLLAMA_URL         → Dolphin3 / any local model (default: http://localhost:11434)
+#   OLLAMA_BASE_URL    → Dolphin3 / any local model (default: http://localhost:11434)
+#                        (also honors OLLAMA_HOST and legacy OLLAMA_URL)
+#
+# Custom provider endpoints (for proxies, local mirrors, etc.):
+#   ANTHROPIC_BASE_URL, OPENAI_BASE_URL, PERPLEXITY_BASE_URL, OPENROUTER_BASE_URL
 #   SUPERMEMORY_API_KEY → Semantic memory backend (context injection + run archival)
 #
 # Usage:
@@ -154,6 +158,53 @@ MODELS = {
 }
 
 
+# ── Provider base URL resolution ─────────────────────────────
+# Each provider honors a standard env var for the base URL, with a
+# sensible default. URL joining is tolerant of trailing slashes and
+# of users supplying either the bare host or a full endpoint path.
+
+_DEFAULT_BASE_URLS = {
+    "anthropic":  "https://api.anthropic.com",
+    "openai":     "https://api.openai.com",
+    "perplexity": "https://api.perplexity.ai",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "ollama":     "http://localhost:11434",
+}
+
+# Env var names checked in order; first non-empty wins.
+_BASE_URL_ENVS = {
+    "anthropic":  ["ANTHROPIC_BASE_URL"],
+    "openai":     ["OPENAI_BASE_URL", "OPENAI_API_BASE"],
+    "perplexity": ["PERPLEXITY_BASE_URL"],
+    "openrouter": ["OPENROUTER_BASE_URL"],
+    # OLLAMA_URL kept for backwards compatibility; OLLAMA_BASE_URL /
+    # OLLAMA_HOST are the standard vars used by the Ollama ecosystem.
+    "ollama":     ["OLLAMA_BASE_URL", "OLLAMA_HOST", "OLLAMA_URL"],
+}
+
+
+def _provider_base_url(provider: str) -> str:
+    """Return the configured base URL for `provider`, trimmed of trailing slashes."""
+    for env in _BASE_URL_ENVS.get(provider, []):
+        val = os.environ.get(env, "").strip()
+        if val:
+            # OLLAMA_HOST can be host:port without scheme — normalize.
+            if provider == "ollama" and "://" not in val:
+                val = "http://" + val
+            return val.rstrip("/")
+    return _DEFAULT_BASE_URLS[provider].rstrip("/")
+
+
+def _join_endpoint(base: str, path: str) -> str:
+    """Join `base` and `path` ensuring exactly one slash and tolerating
+    users who already included `path` (or a prefix of it) in the base."""
+    base = base.rstrip("/")
+    path = "/" + path.lstrip("/")
+    if base.endswith(path):
+        return base
+    return base + path
+
+
 # ── Result container ─────────────────────────────────────────
 class ModelResult:
     def __init__(self, key: str):
@@ -184,8 +235,7 @@ def _run_anthropic(prompt: str, model_id: str, system: str,
         }
         if system:
             payload["system"] = system
-        base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
-        url = base if base.endswith("/v1/messages") else base + "/v1/messages"
+        url = _join_endpoint(_provider_base_url("anthropic"), "/v1/messages")
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode(),
@@ -217,8 +267,9 @@ def _run_openai(prompt: str, model_id: str, system: str,
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
+        url = _join_endpoint(_provider_base_url("openai"), "/v1/chat/completions")
         req = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
+            url,
             data=json.dumps(payload).encode(),
             headers={
                 "Authorization": f"Bearer {key}",
@@ -247,8 +298,9 @@ def _run_perplexity(prompt: str, model_id: str, system: str,
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
+        url = _join_endpoint(_provider_base_url("perplexity"), "/chat/completions")
         req = urllib.request.Request(
-            "https://api.perplexity.ai/chat/completions",
+            url,
             data=json.dumps(payload).encode(),
             headers={
                 "Authorization": f"Bearer {key}",
@@ -316,8 +368,9 @@ def _run_openrouter(prompt: str, model_id: str, system: str,
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
         payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
+        url = _join_endpoint(_provider_base_url("openrouter"), "/chat/completions")
         req = urllib.request.Request(
-            "https://openrouter.ai/api/v1/chat/completions",
+            url,
             data=json.dumps(payload).encode(),
             headers={
                 "Authorization": f"Bearer {key}",
@@ -339,7 +392,7 @@ def _run_ollama(prompt: str, model_id: str, system: str,
                 result: ModelResult, timeout: int):
     try:
         import urllib.request
-        base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        url = _join_endpoint(_provider_base_url("ollama"), "/api/generate")
         payload = {
             "model": model_id,
             "prompt": prompt,
@@ -348,7 +401,7 @@ def _run_ollama(prompt: str, model_id: str, system: str,
         if system:
             payload["system"] = system
         req = urllib.request.Request(
-            f"{base}/api/generate",
+            url,
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -386,7 +439,7 @@ def dolphin_compress(prompt: str, timeout: int = 60) -> str:
     )
     try:
         import urllib.request
-        base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+        url = _join_endpoint(_provider_base_url("ollama"), "/api/generate")
         payload = {
             "model": "nchapman/dolphin3.0-qwen2.5:latest",
             "system": system,
@@ -394,7 +447,7 @@ def dolphin_compress(prompt: str, timeout: int = 60) -> str:
             "stream": False,
         }
         req = urllib.request.Request(
-            f"{base}/api/generate",
+            url,
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -697,8 +750,8 @@ def detect_available_models() -> list:
     ollama_models = set()
     try:
         import urllib.request
-        base = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-        with urllib.request.urlopen(f"{base}/api/tags", timeout=2) as resp:
+        url = _join_endpoint(_provider_base_url("ollama"), "/api/tags")
+        with urllib.request.urlopen(url, timeout=2) as resp:
             data = json.load(resp)
         ollama_models = {m["name"] for m in data.get("models", [])}
     except Exception:
