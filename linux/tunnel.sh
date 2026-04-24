@@ -455,26 +455,82 @@ case "$CMD" in
     FIXED=0
     FAILED=0
 
-    # ── Check 1: GH_TOKEN present and working ───────────────
+    # ── Check 1: GH_TOKEN present, readable, and has write access ──
     echo "[check 1/4] GH_TOKEN ..."
-    GH_TOKEN_VAL=$(_gh_token)
-    if [ -z "$GH_TOKEN_VAL" ]; then
-      echo "  ✗ GH_TOKEN missing from ${BORE_ENV}"
-      echo "  → Add it: echo 'GH_TOKEN=<token>' >> ~/.bore_env"
-      FAILED=$((FAILED+1))
-    else
-      # Test push access
-      HTTP_STATUS=$(curl -so /dev/null -w '%{http_code}' --max-time 6 \
-        -H "Authorization: token ${GH_TOKEN_VAL}" \
+
+    # Helper: test a token and return a status string
+    # Prints: ok | missing | no_read | no_write
+    _test_token() {
+      local TOK="$1"
+      [ -z "$TOK" ] && echo "missing" && return
+      # Read test
+      local R_STATUS
+      R_STATUS=$(curl -so /dev/null -w '%{http_code}' --max-time 6 \
+        -H "Authorization: token ${TOK}" \
         "https://api.github.com/repos/Tsukieomie/pocket-lab-v2-6/contents/bore-port.txt")
-      if [ "$HTTP_STATUS" = "200" ]; then
-        echo "  ✓ GH_TOKEN valid (HTTP 200)"
-      else
-        echo "  ✗ GH_TOKEN present but GitHub returned HTTP ${HTTP_STATUS}"
-        echo "  → Regenerate token at https://github.com/settings/tokens and update ~/.bore_env"
-        FAILED=$((FAILED+1))
+      [ "$R_STATUS" != "200" ] && echo "no_read" && return
+      # Write test (dry-run: try to get SHA, then attempt a no-op PUT with wrong SHA to see if 422 vs 403)
+      local W_STATUS
+      W_STATUS=$(curl -so /dev/null -w '%{http_code}' --max-time 6 -X PUT \
+        -H "Authorization: token ${TOK}" \
+        -H "Content-Type: application/json" \
+        -d '{"message":"probe","content":"Cg==","sha":"0000000000000000000000000000000000000000"}' \
+        "https://api.github.com/repos/Tsukieomie/pocket-lab-v2-6/contents/bore-port.txt")
+      # 422 = wrong SHA (we have write access but SHA mismatch) — that's fine
+      # 403/404/401 = no write permission
+      case "$W_STATUS" in
+        422|200|201) echo "ok" ;;
+        *) echo "no_write" ;;
+      esac
+    }
+
+    # Helper: prompt user for a new token and rotate ~/.bore_env
+    _rotate_token() {
+      echo "  → Open: https://github.com/settings/tokens/new?scopes=repo&description=pocket-lab-bore"
+      echo "  → Create a classic token with 'repo' scope, then paste it here:"
+      printf "  New GH_TOKEN: "
+      read -r NEW_TOKEN
+      NEW_TOKEN=$(echo "$NEW_TOKEN" | tr -d '[:space:]')
+      if [ -z "$NEW_TOKEN" ]; then
+        echo "  ✗ No token entered — skipping rotation"
+        return 1
       fi
-    fi
+      # Validate new token before writing
+      NEW_STATUS=$(_test_token "$NEW_TOKEN")
+      if [ "$NEW_STATUS" != "ok" ]; then
+        echo "  ✗ New token check failed (${NEW_STATUS}) — not saving"
+        return 1
+      fi
+      # Rotate in ~/.bore_env
+      grep -v '^GH_TOKEN=' "$BORE_ENV" > /tmp/_bore_env_tmp 2>/dev/null || true
+      echo "GH_TOKEN=${NEW_TOKEN}" >> /tmp/_bore_env_tmp
+      mv /tmp/_bore_env_tmp "$BORE_ENV"
+      echo "  ✓ GH_TOKEN rotated in ${BORE_ENV}"
+      # Re-export for rest of diagnose run
+      GH_TOKEN_VAL="$NEW_TOKEN"
+      return 0
+    }
+
+    GH_TOKEN_VAL=$(_gh_token)
+    TOKEN_STATUS=$(_test_token "$GH_TOKEN_VAL")
+    case "$TOKEN_STATUS" in
+      ok)
+        echo "  ✓ GH_TOKEN valid (read + write confirmed)"
+        ;;
+      missing)
+        echo "  ✗ GH_TOKEN missing from ${BORE_ENV}"
+        _rotate_token || FAILED=$((FAILED+1))
+        ;;
+      no_read)
+        echo "  ✗ GH_TOKEN present but GitHub returned 4xx on read — token may be expired or revoked"
+        _rotate_token || FAILED=$((FAILED+1))
+        ;;
+      no_write)
+        echo "  ✗ GH_TOKEN present but has no Contents write permission"
+        echo "    (fine-grained PAT without 'Contents: Read and write', or missing 'repo' scope)"
+        _rotate_token || FAILED=$((FAILED+1))
+        ;;
+    esac
 
     # ── Check 2: bore binary present ────────────────────────
     echo "[check 2/4] bore binary ..."
