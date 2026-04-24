@@ -450,6 +450,135 @@ case "$CMD" in
     fi
     ;;
 
+  diagnose)
+    echo "━━━ Pocket Lab Tunnel Diagnose ━━━"
+    FIXED=0
+    FAILED=0
+
+    # ── Check 1: GH_TOKEN present and working ───────────────
+    echo "[check 1/4] GH_TOKEN ..."
+    GH_TOKEN_VAL=$(_gh_token)
+    if [ -z "$GH_TOKEN_VAL" ]; then
+      echo "  ✗ GH_TOKEN missing from ${BORE_ENV}"
+      echo "  → Add it: echo 'GH_TOKEN=<token>' >> ~/.bore_env"
+      FAILED=$((FAILED+1))
+    else
+      # Test push access
+      HTTP_STATUS=$(curl -so /dev/null -w '%{http_code}' --max-time 6 \
+        -H "Authorization: token ${GH_TOKEN_VAL}" \
+        "https://api.github.com/repos/Tsukieomie/pocket-lab-v2-6/contents/bore-port.txt")
+      if [ "$HTTP_STATUS" = "200" ]; then
+        echo "  ✓ GH_TOKEN valid (HTTP 200)"
+      else
+        echo "  ✗ GH_TOKEN present but GitHub returned HTTP ${HTTP_STATUS}"
+        echo "  → Regenerate token at https://github.com/settings/tokens and update ~/.bore_env"
+        FAILED=$((FAILED+1))
+      fi
+    fi
+
+    # ── Check 2: bore binary present ────────────────────────
+    echo "[check 2/4] bore binary ..."
+    BORE_BIN=$(_bore_bin)
+    if [ -z "$BORE_BIN" ]; then
+      echo "  ✗ bore binary not found"
+      echo "  → Auto-installing..."
+      install_bore && BORE_BIN=$(_bore_bin) && echo "  ✓ bore installed: $BORE_BIN" || { echo "  ✗ install failed"; FAILED=$((FAILED+1)); }
+    else
+      echo "  ✓ bore binary: $BORE_BIN"
+    fi
+
+    # ── Check 3: bore server reachable on ctrl port ──────────
+    echo "[check 3/4] bore server ${BORE_HOST}:${BORE_CTRL_PORT} ..."
+    if timeout 5 bash -c "echo >/dev/tcp/${BORE_HOST}/${BORE_CTRL_PORT}" 2>/dev/null; then
+      echo "  ✓ bore server reachable"
+    else
+      echo "  ✗ bore server ${BORE_HOST}:${BORE_CTRL_PORT} unreachable"
+      echo "  → Check if Fly.io machine is running: fly status -a pocket-lab-bore"
+      FAILED=$((FAILED+1))
+    fi
+
+    # ── Check 4: tunnel process + port reachability ──────────
+    echo "[check 4/4] tunnel process + TCP reachability ..."
+    BORE_PID=$(pgrep -f "bore.*local.*22" | head -1 || true)
+    LIVE_PORT=""
+    if _has_systemd_bore && systemctl --user is-active --quiet bore-tunnel.service 2>/dev/null; then
+      LIVE_PORT=$(_systemd_bore_port)
+    fi
+    [ -z "$LIVE_PORT" ] && [ -f "$LOG" ] && \
+      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
+
+    NEEDS_RESTART=false
+    if [ -z "$BORE_PID" ]; then
+      echo "  ✗ bore process not running"
+      NEEDS_RESTART=true
+    elif [ -z "$LIVE_PORT" ]; then
+      echo "  ✗ bore running (PID=${BORE_PID}) but no port detected — likely stale"
+      NEEDS_RESTART=true
+    else
+      # TCP reachability check
+      SAVED_HOST=$(grep '^host=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "$BORE_HOST")
+      if timeout 5 bash -c "echo >/dev/tcp/${SAVED_HOST}/${LIVE_PORT}" 2>/dev/null; then
+        echo "  ✓ tunnel reachable at ${SAVED_HOST}:${LIVE_PORT}"
+        # Sync port.txt if out of date
+        SAVED_PORT=$(grep '^port=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "")
+        if [ "${SAVED_PORT}" != "$LIVE_PORT" ]; then
+          echo "  → bore-port.txt out of sync — resyncing..."
+          push_port "$LIVE_PORT" && FIXED=$((FIXED+1))
+        fi
+      else
+        echo "  ✗ bore running (PID=${BORE_PID}, port=${LIVE_PORT}) but TCP unreachable — stale connection"
+        NEEDS_RESTART=true
+      fi
+    fi
+
+    # ── Auto-fix: restart tunnel if needed ───────────────────
+    if $NEEDS_RESTART; then
+      echo "  → Auto-restarting tunnel..."
+      # Kill stale processes
+      pkill -f "bore.*local.*22" 2>/dev/null || true
+      sleep 1
+      # Reset failed systemd unit
+      if _has_systemd_bore; then
+        systemctl --user reset-failed bore-tunnel.service 2>/dev/null || true
+        systemctl --user start bore-tunnel.service 2>/dev/null || true
+        NEW_PORT=""
+        for i in $(seq 1 20); do
+          NEW_PORT=$(_systemd_bore_port)
+          [ -n "$NEW_PORT" ] && break
+          sleep 1
+        done
+      fi
+      # Fallback to direct if systemd didn't work
+      if [ -z "${NEW_PORT:-}" ] && [ -n "$BORE_BIN" ]; then
+        BORE_IP=$(getent ahostsv4 "${BORE_HOST}" 2>/dev/null | awk '/STREAM/{print $1; exit}' \
+          || echo "${BORE_HOST}")
+        SECRET_ARG=""
+        [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"
+        : > "$LOG"
+        # shellcheck disable=SC2086
+        "$BORE_BIN" local 22 --to "$BORE_IP" $SECRET_ARG >> "$LOG" 2>&1 &
+        for i in $(seq 1 20); do
+          sleep 1
+          NEW_PORT=$(grep "listening at" "$LOG" 2>/dev/null | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
+          [ -n "$NEW_PORT" ] && break
+        done
+      fi
+      if [ -n "${NEW_PORT:-}" ]; then
+        echo "  ✓ Tunnel restarted → ${BORE_HOST}:${NEW_PORT}"
+        echo "  → SSH: ssh -p ${NEW_PORT} $(whoami)@${BORE_HOST}"
+        push_port "$NEW_PORT"
+        FIXED=$((FIXED+1))
+      else
+        echo "  ✗ Restart failed — check: bash $0 status"
+        FAILED=$((FAILED+1))
+      fi
+    fi
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "[diagnose] fixed=${FIXED}  failed=${FAILED}"
+    [ "$FAILED" -eq 0 ] && echo "[diagnose] All checks passed ✓" || echo "[diagnose] Some issues need manual attention — see above"
+    ;;
+
   fs-bridge-start)  fs_bridge_start  ;;
   fs-bridge-stop)   fs_bridge_stop   ;;
   fs-bridge-status) fs_bridge_status ;;
@@ -465,7 +594,7 @@ case "$CMD" in
     ;;
 
   *)
-    echo "Usage: $0 [up|down|status|sync-port|install-bore|install-cloudflared|fs-bridge]"
+    echo "Usage: $0 [up|down|status|diagnose|sync-port|install-bore|install-cloudflared|fs-bridge]"
     exit 1
     ;;
 esac
