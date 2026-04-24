@@ -16,7 +16,7 @@ Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/bin/sh -c '\
   REPO="%h/pocket-lab-v2-6"; \
   BORE_BIN=""; \
-  for P in "$REPO/bore-custom-2222" "%h/.local/bin/bore" "/usr/local/bin/bore" "/usr/bin/bore"; do \
+  for P in "$REPO/bore-custom-8443" "$REPO/bore-custom-2222" "%h/.local/bin/bore" "/usr/local/bin/bore" "/usr/bin/bore"; do \
     [ -x "$P" ] && BORE_BIN="$P" && break; \
   done; \
   if [ -z "$BORE_BIN" ]; then \

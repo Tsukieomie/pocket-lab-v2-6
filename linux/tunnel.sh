@@ -15,9 +15,11 @@
 set -eu
 
 BORE_ENV="${HOME}/.bore_env"
-# Prefer custom bore binary (control port patched to 2222) from repo
+# Prefer custom bore binary (control port patched to 8443) from repo
 REPO_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -x "${REPO_DIR_EARLY}/bore-custom-2222" ]; then
+if [ -x "${REPO_DIR_EARLY}/bore-custom-8443" ]; then
+  BORE_BIN="${REPO_DIR_EARLY}/bore-custom-8443"
+elif [ -x "${REPO_DIR_EARLY}/bore-custom-2222" ]; then
   BORE_BIN="${REPO_DIR_EARLY}/bore-custom-2222"
 elif command -v bore >/dev/null 2>&1; then
   BORE_BIN=$(command -v bore)

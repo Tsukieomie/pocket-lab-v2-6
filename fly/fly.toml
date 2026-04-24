@@ -1,53 +1,23 @@
 # Pocket Lab — Bore Tunnel Server on Fly.io
-# Custom bore build: control port patched from 7835 → 2222
+# Custom bore build: control port patched from 7835 → 8443 (fly.io raw TCP passthrough)
 app = "pocket-lab-bore"
 primary_region = "ord"
 
 [build]
-  dockerfile = "Dockerfile"
-  build_context = ".."
+  image = "alpine"
+
+[processes]
+  app = "/bin/sh -c 'apk add --no-cache wget ca-certificates && wget -q -O /bore https://raw.githubusercontent.com/Tsukieomie/pocket-lab-v2-6/main/bore-custom-8443 && chmod +x /bore && exec /bore server --secret pocketlab2026 --min-port 40000 --max-port 40100 --bind-addr ::'"
 
 [[services]]
-  internal_port = 2222
+  internal_port = 8443
   protocol = "tcp"
+  processes = ["app"]
+  auto_stop_machines = false
+  auto_start_machines = false
 
   [[services.ports]]
-    port = 2222
-
-[[services]]
-  internal_port = 40000
-  protocol = "tcp"
-
-  [[services.ports]]
-    port = 40000
-
-[[services]]
-  internal_port = 40001
-  protocol = "tcp"
-
-  [[services.ports]]
-    port = 40001
-
-[[services]]
-  internal_port = 40002
-  protocol = "tcp"
-
-  [[services.ports]]
-    port = 40002
-
-[[services]]
-  internal_port = 40003
-  protocol = "tcp"
-
-  [[services.ports]]
-    port = 40003
-
-[[services]]
-  internal_port = 40004
-  protocol = "tcp"
-
-  [[services.ports]]
-    port = 40004
+    port = 8443
 
 [vm]
   memory = "256mb"
