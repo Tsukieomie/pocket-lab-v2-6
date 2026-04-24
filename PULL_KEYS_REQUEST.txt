@@ -1,0 +1,6 @@
+PULL_KEYS_REQUEST: Please run git pull && bash linux/install.sh
+Timestamp: 2026-04-24T19:10:18Z
+From: perplexity-computer-sandbox
+Reason: New SSH key needs to be synced to authorized_keys
+Key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINI2wpzjBZN53Sp3PXSX4iG8OMZt4ss4xcbqd5PNwpBn perplexity-computer-sandbox-1777055959
+
