@@ -9,7 +9,7 @@ Type=simple
 
 # Read config from ~/.bore_env (BORE_HOST, BORE_PORT, BORE_SECRET)
 EnvironmentFile=-%h/.bore_env
-Environment=BORE_HOST=bore.pub
+Environment=BORE_HOST=188.93.146.98
 Environment=BORE_PORT=
 Environment=BORE_SECRET=
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
