@@ -63,8 +63,6 @@ fi
 echo "[3/5] Installing systemd user service..."
 mkdir -p "${HOME}/.config/systemd/user"
 cp "$CF_SERVICE_SRC" "$CF_SERVICE_DST"
-# Patch ExecStart to use the exact binary path (avoids PATH issues)
-sed -i "s|cloudflared tunnel|${CF_BIN} tunnel|g" "$CF_SERVICE_DST" || true
 systemctl --user daemon-reload
 systemctl --user disable bore-tunnel.service 2>/dev/null && echo "  bore-tunnel.service disabled" || true
 systemctl --user enable "$CF_SERVICE"
