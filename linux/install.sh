@@ -100,6 +100,45 @@ if [ -f "${REPO_DIR}/dedup-authorized-keys.sh" ]; then
   bash "${REPO_DIR}/dedup-authorized-keys.sh"
 fi
 
+echo ""
+echo ">> Pre-scanning tunnel hosts into ~/.ssh/known_hosts ..."
+# Avoids interactive 'Are you sure you want to continue connecting?' prompts
+# when Perplexity Computer SSHes in through the tunnel for the first time.
+mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
+touch "${HOME}/.ssh/known_hosts" && chmod 600 "${HOME}/.ssh/known_hosts"
+
+_keyscan_host() {
+  local HOST="$1"
+  local PORT="${2:-22}"
+  # Skip if all key types for this host are already present
+  if ssh-keygen -F "${HOST}" -f "${HOME}/.ssh/known_hosts" >/dev/null 2>&1; then
+    echo "   ${HOST}: already in known_hosts — skipping"
+    return 0
+  fi
+  echo "   Scanning ${HOST}:${PORT} ..."
+  local SCANNED
+  SCANNED=$(ssh-keyscan -T 8 -p "${PORT}" -H "${HOST}" 2>/dev/null)
+  if [ -n "$SCANNED" ]; then
+    echo "$SCANNED" >> "${HOME}/.ssh/known_hosts"
+    local COUNT
+    COUNT=$(echo "$SCANNED" | wc -l)
+    echo "   ${HOST}: added ${COUNT} key(s) ✓"
+  else
+    echo "   ${HOST}: keyscan failed (host unreachable or port blocked) — skipping"
+    echo "   (SSH will prompt on first connect; run install.sh again when connected)"
+  fi
+}
+
+# Hosts to pre-scan:
+# - bore.pub        : legacy bore tunnel server (port 7835 for control, SSH over random port)
+# - serveo.net      : fallback SSH relay (port 80/443)
+# cloudflared tunnels use HTTPS termination — no SSH host key to scan for those.
+for HOST in bore.pub serveo.net; do
+  _keyscan_host "$HOST" 22
+done
+
+echo "   known_hosts pre-scan complete."
+
 echo ">> Configuring ~/.bore_env ..."
 
 # ── Helper: read/write individual keys in ~/.bore_env ────────────────────────
