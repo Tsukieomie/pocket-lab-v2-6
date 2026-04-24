@@ -47,11 +47,26 @@ _has_systemd_tunnel() {
 # cloudflared quick-tunnel prints: "Your quick Tunnel has been created! Visit it at (it may take some time to be reachable): https://XXXXX.trycloudflare.com"
 # For TCP tunnels it prints: "INF | Registered tunnel connection"
 # We capture the trycloudflare.com hostname from the log.
+# IMPORTANT: uses --since based on the service's last ExecMainStartTimestamp so we
+# never read stale hostnames from previous service invocations.
 _systemd_tunnel_url() {
-  journalctl --user -u cloudflared-tunnel.service -n 300 --no-pager 2>/dev/null \
-    | sed 's/\x1b\[[0-9;]*m//g' \
-    | grep -oE '[a-z0-9-]+\.trycloudflare\.com' \
-    | tail -1 || true
+  # Get the timestamp of the current/last service start so we only read fresh logs
+  local SINCE
+  SINCE=$(systemctl --user show cloudflared-tunnel.service \
+    --property=ExecMainStartTimestamp 2>/dev/null \
+    | sed 's/ExecMainStartTimestamp=//' | grep -v '^$' || echo "")
+  if [ -n "$SINCE" ] && [ "$SINCE" != "n/a" ]; then
+    journalctl --user -u cloudflared-tunnel.service --since="$SINCE" --no-pager 2>/dev/null \
+      | sed 's/\x1b\[[0-9;]*m//g' \
+      | grep -oE '[a-z0-9-]+\.trycloudflare\.com' \
+      | tail -1 || true
+  else
+    # Fallback: limit to last 300 lines (less reliable but safe)
+    journalctl --user -u cloudflared-tunnel.service -n 300 --no-pager 2>/dev/null \
+      | sed 's/\x1b\[[0-9;]*m//g' \
+      | grep -oE '[a-z0-9-]+\.trycloudflare\.com' \
+      | tail -1 || true
+  fi
 }
 
 # ── push_port: write bore-port.txt and push to GitHub ───────
