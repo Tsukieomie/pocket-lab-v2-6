@@ -6,9 +6,18 @@
 # This script switches Pocket Lab to cloudflared (HTTPS/443)
 # which bypasses all standard port blocks.
 #
+# UDP/QUIC note:
+#   Some networks (university, corporate, mobile) block UDP outbound.
+#   cloudflared defaults to QUIC (UDP/7844) and fails with:
+#     "sendmsg: operation not permitted"
+#   This script forces --no-quic --edge-ip-version=4 so cloudflared
+#   uses HTTP/2 over TCP/443 only, which works on all networks that
+#   allow HTTPS.
+#
 # What it does:
 #   1. Installs cloudflared binary (~60 MB, once)
 #   2. Installs + enables the systemd user service
+#      (with --no-quic --edge-ip-version=4 baked in)
 #   3. Starts the tunnel and waits for a hostname
 #   4. Pushes the new hostname to bore-port.txt on GitHub
 #   5. Prints the SSH proxy-jump command to connect
@@ -63,6 +72,19 @@ fi
 echo "[3/5] Installing systemd user service..."
 mkdir -p "${HOME}/.config/systemd/user"
 cp "$CF_SERVICE_SRC" "$CF_SERVICE_DST"
+
+# Ensure --no-quic and --edge-ip-version=4 are present in the installed unit.
+# The template already includes these flags, but patch any pre-existing install
+# that was written before this fix was added (idempotent).
+if ! grep -q '\-\-no-quic' "$CF_SERVICE_DST" 2>/dev/null; then
+  sed -i "s|exec.*cloudflared.*tunnel|& --no-quic|" "$CF_SERVICE_DST"
+  echo "  Patched service: added --no-quic (UDP blocked on this network)"
+fi
+if ! grep -q 'edge-ip-version' "$CF_SERVICE_DST" 2>/dev/null; then
+  sed -i "s|--no-quic|--no-quic --edge-ip-version=4|" "$CF_SERVICE_DST"
+  echo "  Patched service: added --edge-ip-version=4"
+fi
+
 systemctl --user daemon-reload
 systemctl --user disable bore-tunnel.service 2>/dev/null && echo "  bore-tunnel.service disabled" || true
 systemctl --user enable "$CF_SERVICE"
