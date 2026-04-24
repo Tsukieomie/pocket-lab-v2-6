@@ -1,103 +1,129 @@
 #!/bin/bash
 # ============================================================
-# linux/tunnel.sh — Pocket Lab bore tunnel for Linux laptop
+# linux/tunnel.sh — Pocket Lab SSH tunnel (v3.0)
+#
+# Primary backend: bore TCP → 188.93.146.98:2222
+# Fallback: cloudflared quick-tunnel (HTTP only, no SSH proxy)
+#
+# bore tunnels pure TCP — works with standard SSH, no proxy
+# command needed. SSH connect command:
+#   ssh -p <port> kenny@188.93.146.98
 #
 # Works as a normal user (no root/sudo required).
-# Equivalent to: sh pocket_lab.sh tunnel up
-# but resolves paths relative to $HOME instead of /root/
 #
 # Usage:
 #   bash ~/pocket-lab-v2-6/linux/tunnel.sh up
 #   bash ~/pocket-lab-v2-6/linux/tunnel.sh down
 #   bash ~/pocket-lab-v2-6/linux/tunnel.sh status
-#   bash ~/pocket-lab-v2-6/linux/tunnel.sh install-bore   # downloads bore binary to ~/.local/bin/
+#   bash ~/pocket-lab-v2-6/linux/tunnel.sh sync-port
+#   bash ~/pocket-lab-v2-6/linux/tunnel.sh install-bore
+#   bash ~/pocket-lab-v2-6/linux/tunnel.sh install-cloudflared  (legacy)
+#   bash ~/pocket-lab-v2-6/linux/tunnel.sh fs-bridge [start|stop|status]
 # ============================================================
 set -eu
 
 BORE_ENV="${HOME}/.bore_env"
-# Prefer custom bore binary (control port patched to 8443) from repo
-REPO_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -x "${REPO_DIR_EARLY}/bore-custom-8443" ]; then
-  BORE_BIN="${REPO_DIR_EARLY}/bore-custom-8443"
-elif [ -x "${REPO_DIR_EARLY}/bore-custom-2222" ]; then
-  BORE_BIN="${REPO_DIR_EARLY}/bore-custom-2222"
-elif command -v bore >/dev/null 2>&1; then
-  BORE_BIN=$(command -v bore)
-else
-  BORE_BIN="${HOME}/.local/bin/bore"
-fi
-LOG="/tmp/bore-tunnel-linux.log"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOG="/tmp/bore-tunnel.log"
+CF_LOG="/tmp/cloudflared-tunnel.log"
 
-_bore_host() { grep '^BORE_HOST=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo "188.93.146.98"; }
-# bore-custom-2222 binary uses port 443 as control port (bypasses ISP blocks)
-# Resolve hostname to IPv4 only — avoids IPv6 timeout on networks that block it.
-# Falls back to the hostname if resolution fails.
-_bore_host_ipv4() {
-  local HOST
-  HOST=$(_bore_host)
-  getent ahostsv4 "$HOST" 2>/dev/null | awk '/STREAM/{print $1; exit}' \
-    || python3 -c "import socket; print(socket.getaddrinfo('$HOST',None,socket.AF_INET)[0][4][0])" 2>/dev/null \
-    || echo "$HOST"
+# ── bore defaults (overridable via ~/.bore_env) ──────────────
+BORE_HOST="${BORE_HOST:-188.93.146.98}"
+BORE_SECRET="${BORE_SECRET:-pocketlab2026}"
+BORE_CTRL_PORT="${BORE_CTRL_PORT:-2222}"
+
+# Source ~/.bore_env for overrides (ignore missing)
+# shellcheck disable=SC1090
+[ -f "$BORE_ENV" ] && set +eu && . "$BORE_ENV" && set -eu || true
+
+# ── bore binary resolution ───────────────────────────────────
+_bore_bin() {
+  for P in \
+    "${REPO_DIR}/bore-custom-2222" \
+    "${HOME}/.local/bin/bore" \
+    "/usr/local/bin/bore" \
+    "/usr/bin/bore"; do
+    [ -x "$P" ] && echo "$P" && return 0
+  done
+  command -v bore 2>/dev/null || echo ""
 }
-_bore_port() { grep '^BORE_PORT=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo ""; }
-_bore_secret() { grep '^BORE_SECRET=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo ""; }
-# ── Systemd user service integration (v2.8.1) ───────────────
-# If bore-tunnel.service exists as a user unit, defer to it: the service owns
-# the tunnel and bore-port-watcher.service pushes port changes to GitHub.
-_has_systemd_tunnel() {
+
+# ── cloudflared binary resolution (legacy fallback) ─────────
+_cf_bin() {
+  for P in \
+    "${HOME}/.local/bin/cloudflared" \
+    "/usr/local/bin/cloudflared" \
+    "/usr/bin/cloudflared"; do
+    [ -x "$P" ] && echo "$P" && return 0
+  done
+  command -v cloudflared 2>/dev/null || echo ""
+}
+
+# ── ~/.bore_env helpers ──────────────────────────────────────
+_gh_token() { grep '^GH_TOKEN=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || true; }
+
+# ── Systemd user service helpers ────────────────────────────
+_has_systemd_bore() {
   systemctl --user list-unit-files bore-tunnel.service 2>/dev/null \
     | grep -q '^bore-tunnel\.service'
 }
-_systemd_tunnel_port() {
-  # Extract the assigned tunnel port from the bore-tunnel.service journal.
-  # bore v0.6.x logs on success: "listening at bore.pub:PORT"
-  # Must NOT match "connecting to bore.pub:7835" (the control port).
-  local RAW
-  RAW=$(journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
-    | sed 's/\x1b\[[0-9;]*m//g')
-  # Match only lines containing "listening at" then extract the port
-  echo "$RAW" | grep 'listening at' | grep -oE ':[0-9]+' | tail -1 | tr -d ':' | grep -E '^[0-9]+$' \
-    || echo "$RAW" | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 | grep -E '^[0-9]+$' \
-    || true
+
+_has_systemd_cf() {
+  systemctl --user list-unit-files cloudflared-tunnel.service 2>/dev/null \
+    | grep -q '^cloudflared-tunnel\.service'
 }
 
+# Extract bore port from journal — scoped to current service invocation
+_systemd_bore_port() {
+  local SINCE
+  SINCE=$(systemctl --user show bore-tunnel.service \
+    --property=ExecMainStartTimestamp 2>/dev/null \
+    | sed 's/ExecMainStartTimestamp=//' | grep -v '^$' || echo "")
+  if [ -n "$SINCE" ] && [ "$SINCE" != "n/a" ]; then
+    journalctl --user -u bore-tunnel.service --since="$SINCE" --no-pager 2>/dev/null \
+      | sed 's/\x1b\[[0-9;]*m//g' \
+      | grep "listening at" | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true
+  else
+    journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
+      | sed 's/\x1b\[[0-9;]*m//g' \
+      | grep "listening at" | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true
+  fi
+}
 
-# ── push_port: write bore-port.txt locally + push to GitHub atomically ──────
-# Called immediately after bore reports its remote_port — no watcher needed.
-# Token sources (checked in order):
-#   1. GH_TOKEN in ~/.bore_env
-#   2. ~/.bore-github-token
+# ── push_port: write bore-port.txt and push to GitHub ───────
+# Records bore host + port so Computer can SSH in directly:
+#   ssh -p <port> kenny@188.93.146.98
 push_port() {
-  local PORT="$1"
-  local BORE_HOST_VAL
-  BORE_HOST_VAL=$(_bore_host)
+  local PORT_VAL="$1"
   local TIMESTAMP
   TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  local USERNAME
+  USERNAME=$(whoami)
 
-  # ── 1. Write local bore-port.txt immediately (always succeeds) ──
+  # ── 1. Write local bore-port.txt ──
   cat > "$REPO_DIR/bore-port.txt" << PORTFILE
-port=${PORT}
-host=${BORE_HOST_VAL}
-ssh=ssh -p ${PORT} $(whoami)@${BORE_HOST_VAL}
+port=${PORT_VAL}
+host=${BORE_HOST}
+ssh=ssh -p ${PORT_VAL} ${USERNAME}@${BORE_HOST}
 updated=${TIMESTAMP}
 machine=$(hostname)
 PORTFILE
-  echo "[tunnel] bore-port.txt updated locally → port=${PORT}"
+  echo "[tunnel] bore-port.txt updated → port=${PORT_VAL} host=${BORE_HOST}"
+  # Prevent 'git pull' conflicts — bore-port.txt is runtime state, not source.
+  git -C "$REPO_DIR" update-index --assume-unchanged bore-port.txt 2>/dev/null || true
 
   # ── 2. Resolve GitHub token ──
   local GH_TOKEN=""
-  GH_TOKEN=$(grep '^GH_TOKEN=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || true)
+  GH_TOKEN=$(_gh_token)
   if [ -z "$GH_TOKEN" ] && [ -f "${HOME}/.bore-github-token" ]; then
     GH_TOKEN=$(cat "${HOME}/.bore-github-token")
   fi
   if [ -z "$GH_TOKEN" ]; then
     echo "[tunnel] No GH_TOKEN found — skipping GitHub push (bore-port.txt local only)"
-    echo "[tunnel] Set GH_TOKEN in ~/.bore_env to enable automatic GitHub sync"
     return 0
   fi
 
-  # ── 3. Push to GitHub atomically (get current SHA first) ──
+  # ── 3. Push to GitHub atomically ──
   local REPO="Tsukieomie/pocket-lab-v2-6"
   local FILE="bore-port.txt"
   local ENCODED
@@ -111,9 +137,9 @@ PORTFILE
 
   local PAYLOAD
   if [ -n "$SHA" ]; then
-    PAYLOAD="{\"message\":\"bore port ${PORT} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\",\"sha\":\"${SHA}\"}"
+    PAYLOAD="{\"message\":\"tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\",\"sha\":\"${SHA}\"}"
   else
-    PAYLOAD="{\"message\":\"bore port ${PORT} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\"}"
+    PAYLOAD="{\"message\":\"tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\"}"
   fi
 
   local PUSH_OK=false
@@ -125,36 +151,13 @@ PORTFILE
     && PUSH_OK=true \
     || echo "[tunnel] GitHub push failed (non-fatal) — local bore-port.txt is current"
 
-  if [ "$PUSH_OK" = false ]; then
-    return 0
-  fi
-
-  # ── 4. Post-push verification — read back from GitHub raw CDN ──
-  # Retry up to 5s to allow CDN propagation.
-  local VERIFIED=false
-  local REMOTE_PORT=""
-  for _i in 1 2 3 4 5; do
-    REMOTE_PORT=$(curl -sf --max-time 6 \
-      "https://raw.githubusercontent.com/${REPO}/main/${FILE}?$(date +%s)" \
-      | grep '^port=' | cut -d= -f2 || echo "")
-    if [ "$REMOTE_PORT" = "$PORT" ]; then
-      VERIFIED=true
-      break
-    fi
-    sleep 1
-  done
-
-  if [ "$VERIFIED" = true ]; then
-    echo "[tunnel] GitHub bore-port.txt verified ✓ (port=${PORT} confirmed on raw CDN)"
-  else
-    echo "[tunnel] WARNING: push succeeded but raw CDN returned port=${REMOTE_PORT:-<empty>} (expected ${PORT})"
-    echo "[tunnel] CDN propagation may be delayed — local bore-port.txt is authoritative"
-  fi
+  $PUSH_OK && echo "[tunnel] GitHub bore-port.txt synced ✓ (port=${PORT_VAL} host=${BORE_HOST})" || true
 }
 
-# Keep old name as alias for backwards compat
+# Keep old alias
 push_port_to_github() { push_port "$1"; }
 
+# ── install-bore ─────────────────────────────────────────────
 install_bore() {
   echo "[tunnel] Installing bore binary to ~/.local/bin/ ..."
   mkdir -p "${HOME}/.local/bin"
@@ -163,7 +166,7 @@ install_bore() {
     x86_64)  BORE_TARGET="x86_64-unknown-linux-musl" ;;
     aarch64) BORE_TARGET="aarch64-unknown-linux-musl" ;;
     armv7l)  BORE_TARGET="armv7-unknown-linux-musleabihf" ;;
-    *)       echo "[tunnel] ERROR: Unknown arch $ARCH — download bore manually from https://github.com/ekzhang/bore/releases"; exit 1 ;;
+    *)       echo "[tunnel] ERROR: Unknown arch $ARCH"; exit 1 ;;
   esac
   BORE_VER="0.6.0"
   URL="https://github.com/ekzhang/bore/releases/download/v${BORE_VER}/bore-v${BORE_VER}-${BORE_TARGET}.tar.gz"
@@ -172,206 +175,48 @@ install_bore() {
   tar -xzf /tmp/bore-linux.tar.gz -C /tmp
   chmod +x /tmp/bore
   mv /tmp/bore "${HOME}/.local/bin/bore"
-  BORE_BIN="${HOME}/.local/bin/bore"
-  echo "[tunnel] bore installed: $BORE_BIN"
-  echo "[tunnel] Make sure ~/.local/bin is in your PATH:"
-  echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
+  echo "[tunnel] bore installed: ${HOME}/.local/bin/bore"
+  "${HOME}/.local/bin/bore" --version 2>/dev/null || true
 }
 
-CMD="${1:-status}"
-
-case "$CMD" in
-  install-bore)
-    install_bore
-    ;;
-
-  up)
-    # v2.8.2: systemd path now pushes port atomically — no watcher needed
-    if _has_systemd_tunnel; then
-      systemctl --user start bore-tunnel.service 2>&1 || true
-      # Poll up to 15s for bore to report its remote_port
-      LIVE_PORT=""
-      for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-        LIVE_PORT=$(_systemd_tunnel_port)
-        [ -n "$LIVE_PORT" ] && break
-        sleep 1
-      done
-      if [ -n "$LIVE_PORT" ]; then
-        echo "[tunnel] UP (systemd) → bore.pub:$LIVE_PORT"
-        echo "[tunnel] SSH: ssh -p $LIVE_PORT $(whoami)@bore.pub"
-        # Push port immediately — don't rely on bore-port-watcher.service
-        push_port "$LIVE_PORT"
-        exit 0
-      else
-        echo "[tunnel] systemd bore-tunnel.service did not report a port; falling back to manual"
-      fi
-    fi
-
-    # Check bore binary
-    if ! command -v bore >/dev/null 2>&1 && [ ! -x "$BORE_BIN" ]; then
-      echo "[tunnel] bore not found — installing..."
-      install_bore
-    fi
-
-    if pgrep -f "bore local 22" >/dev/null 2>&1; then
-      echo "[tunnel] Already running."
-      exit 0
-    fi
-
-    BORE_HOST=$(_bore_host)
-    BORE_HOST_IP=$(_bore_host_ipv4)
-    BORE_PORT=$(_bore_port)
-    BORE_SECRET=$(_bore_secret)
-
-    SECRET_ARG=""
-    [ -n "$BORE_SECRET" ] && SECRET_ARG="--secret $BORE_SECRET"
-    PORT_ARG=""
-    [ -n "$BORE_PORT" ] && PORT_ARG="--port $BORE_PORT"
-
-    [ "$BORE_HOST_IP" != "$BORE_HOST" ] && echo "[tunnel] Resolved $BORE_HOST → $BORE_HOST_IP (IPv4)"
-    echo "[tunnel] Starting: bore local 22 --to $BORE_HOST_IP $PORT_ARG ..."
-    # Truncate log so we only read the current run's remote_port
-    : > "$LOG"
-    # shellcheck disable=SC2086
-    "$BORE_BIN" local 22 --to "$BORE_HOST_IP" $PORT_ARG $SECRET_ARG \
-      > "$LOG" 2>&1 &
-
-    # Poll for the remote_port up to ~10s instead of a fixed sleep 3
-    LIVE_PORT=""
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-      sleep 1
-      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
-        | grep -oE 'bore\.pub:[0-9]+' | tail -1 | cut -d: -f2 | grep -E '^[0-9]+$' || \
-        sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
-        | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 | grep -E '^[0-9]+$' || true)
-      [ -n "$LIVE_PORT" ] && break
-    done
-
-    if pgrep -f "bore local 22" >/dev/null 2>&1 && [ -n "$LIVE_PORT" ]; then
-      echo "[tunnel] UP → $BORE_HOST:$LIVE_PORT"
-      echo "[tunnel] SSH command: ssh -p $LIVE_PORT $(whoami)@$BORE_HOST"
-      # Write local file + push to GitHub in one step
-      push_port "$LIVE_PORT"
-    else
-      echo "[tunnel] FAILED — check $LOG"
-      cat "$LOG"
+# ── install-cloudflared (legacy) ─────────────────────────────
+install_cloudflared() {
+  echo "[tunnel] Installing cloudflared to ~/.local/bin/ ..."
+  mkdir -p "${HOME}/.local/bin"
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64)  CF_ARCH="amd64"   ;;
+    aarch64) CF_ARCH="arm64"   ;;
+    armv7l)  CF_ARCH="arm"     ;;
+    *)
+      echo "[tunnel] ERROR: Unknown arch $ARCH"
       exit 1
-    fi
-    ;;
+      ;;
+  esac
+  URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}"
+  echo "[tunnel] Downloading $URL ..."
+  curl -fsSL "$URL" -o "${HOME}/.local/bin/cloudflared"
+  chmod +x "${HOME}/.local/bin/cloudflared"
+  echo "[tunnel] cloudflared installed: ${HOME}/.local/bin/cloudflared"
+  "${HOME}/.local/bin/cloudflared" --version
+}
 
-  down)
-    if _has_systemd_tunnel && systemctl --user is-active --quiet bore-tunnel.service; then
-      systemctl --user stop bore-tunnel.service && echo "[tunnel] Stopped (systemd)." && exit 0
-    fi
-    pkill -f "bore local 22" 2>/dev/null && echo "[tunnel] Stopped." || echo "[tunnel] Not running."
-    ;;
-
-  status)
-    # v2.8.2: prefer systemd-reported port if service is active
-    if _has_systemd_tunnel && systemctl --user is-active --quiet bore-tunnel.service; then
-      LIVE_PORT=$(_systemd_tunnel_port)
-      [ -z "$LIVE_PORT" ] && LIVE_PORT="?"
-      echo "[tunnel] RUNNING (systemd) → bore.pub:$LIVE_PORT"
-      echo "[tunnel] SSH: ssh -p $LIVE_PORT $(whoami)@bore.pub"
-      # Show whether bore-port.txt matches live port
-      LOCAL_PORT=$(grep '^port=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "unknown")
-      if [ "$LOCAL_PORT" != "$LIVE_PORT" ] && [ "$LIVE_PORT" != "?" ]; then
-        echo "[tunnel] WARNING: bore-port.txt has port=$LOCAL_PORT but live port is $LIVE_PORT"
-        echo "[tunnel] Run: bash $0 sync-port   to fix"
-      else
-        echo "[tunnel] bore-port.txt in sync ✓"
-      fi
-      exit 0
-    fi
-    if pgrep -f "bore local 22" >/dev/null 2>&1; then
-      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
-        | grep -oE 'bore\.pub:[0-9]+' | tail -1 | cut -d: -f2 | grep -E '^[0-9]+$' || \
-        sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
-        | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 | grep -E '^[0-9]+$' || echo "?")
-      echo "[tunnel] RUNNING → $(_bore_host):$LIVE_PORT"
-      echo "[tunnel] SSH: ssh -p $LIVE_PORT $(whoami)@$(_bore_host)"
-    else
-      echo "[tunnel] DOWN"
-    fi
-    ;;
-
-  sync-port)
-    # Manually re-read live bore port and push — useful if watcher missed it
-    if _has_systemd_tunnel && systemctl --user is-active --quiet bore-tunnel.service; then
-      LIVE_PORT=$(_systemd_tunnel_port)
-      if [ -n "$LIVE_PORT" ]; then
-        echo "[tunnel] Syncing port $LIVE_PORT → bore-port.txt + GitHub..."
-        push_port "$LIVE_PORT"
-      else
-        echo "[tunnel] Could not read live port from systemd journal"
-        exit 1
-      fi
-    elif pgrep -f "bore local 22" >/dev/null 2>&1; then
-      LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
-        | grep -oE 'bore\.pub:[0-9]+' | tail -1 | cut -d: -f2 | grep -E '^[0-9]+$' || \
-        sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
-        | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 | grep -E '^[0-9]+$' || true)
-      if [ -n "$LIVE_PORT" ]; then
-        echo "[tunnel] Syncing port $LIVE_PORT → bore-port.txt + GitHub..."
-        push_port "$LIVE_PORT"
-      else
-        echo "[tunnel] bore is running but port not found in log"
-        exit 1
-      fi
-    else
-      echo "[tunnel] Tunnel is not running"
-      exit 1
-    fi
-    ;;
-
-  fs-bridge-start)
-    fs_bridge_start
-    ;;
-
-  fs-bridge-stop)
-    fs_bridge_stop
-    ;;
-
-  fs-bridge-status)
-    fs_bridge_status
-    ;;
-
-  fs-bridge)
-    # alias: fs-bridge [start|stop|status]
-    SUBCMD="${2:-status}"
-    case "$SUBCMD" in
-      start)  fs_bridge_start  ;;
-      stop)   fs_bridge_stop   ;;
-      status) fs_bridge_status ;;
-      *) echo "Usage: $0 fs-bridge [start|stop|status]"; exit 1 ;;
-    esac
-    ;;
-
-  *)
-    echo "Usage: $0 [up|down|status|sync-port|install-bore|fs-bridge]"
-    exit 1
-    ;;
-esac
-
-# ── fs-bridge: start/stop/status the Pocket Lab filesystem bridge ────────────
+# ── fs-bridge helpers ────────────────────────────────────────
 _fs_bridge_pid() { pgrep -f "node.*fs-bridge/server.js" | head -1 || true; }
 
 fs_bridge_start() {
   if [ -n "$(_fs_bridge_pid)" ]; then echo "[fs-bridge] Already running."; return 0; fi
-  # Try systemd user service first
-  if systemctl --user list-unit-files fs-bridge.service &>/dev/null 2>&1 | grep -q '^fs-bridge'; then
+  if systemctl --user list-unit-files fs-bridge.service 2>/dev/null | grep -q '^fs-bridge'; then
     systemctl --user start fs-bridge.service && echo "[fs-bridge] Started (systemd)." && return 0
   fi
-  # Fallback: direct node
   BRIDGE="$REPO_DIR/linux/fs-bridge/server.js"
   if [ ! -f "$BRIDGE" ]; then echo "[fs-bridge] ERROR: $BRIDGE not found"; return 1; fi
-  if ! command -v node &>/dev/null; then echo "[fs-bridge] ERROR: node not found — install Node.js 18+"; return 1; fi
+  if ! command -v node &>/dev/null; then echo "[fs-bridge] ERROR: node not found"; return 1; fi
   node "$BRIDGE" >> /tmp/fs-bridge.log 2>&1 &
   sleep 1
   PID=$(_fs_bridge_pid)
   if [ -n "$PID" ]; then
     echo "[fs-bridge] Started (pid=$PID) on 127.0.0.1:7779"
-    echo "[fs-bridge] Log: /tmp/fs-bridge.log"
   else
     echo "[fs-bridge] FAILED — check /tmp/fs-bridge.log"; return 1
   fi
@@ -390,7 +235,6 @@ fs_bridge_status() {
   if [ -n "$PID" ]; then
     PORT=$(ss -tlnp 2>/dev/null | grep "$PID" | grep -oE '127\.0\.0\.1:[0-9]+' | head -1 | cut -d: -f2 || echo "7779")
     echo "[fs-bridge] RUNNING (pid=$PID, port=${PORT:-7779})"
-    # Quick local health check
     TOKEN_VAL=$(grep '^FS_BRIDGE_TOKEN=' "${HOME}/.bore_env" 2>/dev/null | cut -d= -f2 || echo "")
     if [ -n "$TOKEN_VAL" ]; then
       STATUS=$(curl -sf -H "Authorization: Bearer $TOKEN_VAL" http://127.0.0.1:7779/status 2>/dev/null || echo "{}")
@@ -400,3 +244,163 @@ fs_bridge_status() {
     echo "[fs-bridge] DOWN"
   fi
 }
+
+# ── Main ─────────────────────────────────────────────────────
+CMD="${1:-status}"
+
+case "$CMD" in
+  install-bore)
+    install_bore
+    ;;
+
+  install-cloudflared)
+    install_cloudflared
+    ;;
+
+  up)
+    # ── Prefer bore-tunnel systemd service ──
+    if _has_systemd_bore; then
+      systemctl --user start bore-tunnel.service 2>&1 || true
+      LIVE_PORT=""
+      for i in $(seq 1 20); do
+        LIVE_PORT=$(_systemd_bore_port)
+        [ -n "$LIVE_PORT" ] && break
+        sleep 1
+      done
+      if [ -n "$LIVE_PORT" ]; then
+        echo "[tunnel] UP (systemd/bore) → ${BORE_HOST}:${LIVE_PORT}"
+        echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
+        push_port "$LIVE_PORT"
+        exit 0
+      else
+        echo "[tunnel] bore-tunnel.service did not report a port within 20s; falling back to direct"
+      fi
+    fi
+
+    # ── Direct bore invocation ──
+    BORE_BIN=$(_bore_bin)
+    if [ -z "$BORE_BIN" ]; then
+      echo "[tunnel] bore not found — installing..."
+      install_bore
+      BORE_BIN="${HOME}/.local/bin/bore"
+    fi
+
+    if pgrep -f "bore local 22" >/dev/null 2>&1; then
+      echo "[tunnel] Already running."
+      exit 0
+    fi
+
+    # Resolve IP (bore needs IP, not hostname, on some builds)
+    BORE_IP=$(getent ahostsv4 "${BORE_HOST}" 2>/dev/null | awk '/STREAM/{print $1; exit}' \
+      || python3 -c "import socket; print(socket.getaddrinfo('${BORE_HOST}',None,socket.AF_INET)[0][4][0])" 2>/dev/null \
+      || echo "${BORE_HOST}")
+
+    echo "[tunnel] Starting bore tunnel → ${BORE_HOST} (${BORE_IP}) ctrl=${BORE_CTRL_PORT} ..."
+    : > "$LOG"
+    SECRET_ARG=""
+    [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"
+    # shellcheck disable=SC2086
+    "$BORE_BIN" local 22 --to "$BORE_IP" $SECRET_ARG >> "$LOG" 2>&1 &
+
+    # Poll up to 30s for "listening at :<port>"
+    LIVE_PORT=""
+    for i in $(seq 1 30); do
+      sleep 1
+      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
+        | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
+      [ -n "$LIVE_PORT" ] && break
+    done
+
+    if pgrep -f "bore local 22" >/dev/null 2>&1 && [ -n "$LIVE_PORT" ]; then
+      echo "[tunnel] UP → ${BORE_HOST}:${LIVE_PORT}"
+      echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
+      push_port "$LIVE_PORT"
+    else
+      echo "[tunnel] FAILED — check $LOG"
+      tail -30 "$LOG"
+      exit 1
+    fi
+    ;;
+
+  down)
+    # Stop bore systemd service if running
+    if _has_systemd_bore && systemctl --user is-active --quiet bore-tunnel.service 2>/dev/null; then
+      systemctl --user stop bore-tunnel.service && echo "[tunnel] Stopped (systemd/bore)." && exit 0
+    fi
+    # Stop cloudflared systemd service if running
+    if _has_systemd_cf && systemctl --user is-active --quiet cloudflared-tunnel.service 2>/dev/null; then
+      systemctl --user stop cloudflared-tunnel.service && echo "[tunnel] Stopped (systemd/cloudflared)." && exit 0
+    fi
+    # Kill direct bore process
+    pkill -f "bore local 22" 2>/dev/null \
+      && echo "[tunnel] Stopped (bore)." \
+      || echo "[tunnel] Not running."
+    ;;
+
+  status)
+    # bore systemd
+    if _has_systemd_bore && systemctl --user is-active --quiet bore-tunnel.service 2>/dev/null; then
+      LIVE_PORT=$(_systemd_bore_port)
+      [ -z "$LIVE_PORT" ] && LIVE_PORT="(port pending)"
+      echo "[tunnel] RUNNING (systemd/bore) → ${BORE_HOST}:${LIVE_PORT}"
+      echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
+      LOCAL_PORT=$(grep '^port=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "unknown")
+      if [ "$LOCAL_PORT" != "$LIVE_PORT" ]; then
+        echo "[tunnel] WARNING: bore-port.txt has port=${LOCAL_PORT} but live port is ${LIVE_PORT}"
+        echo "[tunnel] Run: bash $0 sync-port"
+      else
+        echo "[tunnel] bore-port.txt in sync ✓"
+      fi
+      exit 0
+    fi
+    # direct bore process
+    if pgrep -f "bore local 22" >/dev/null 2>&1; then
+      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
+        | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || echo "?")
+      echo "[tunnel] RUNNING (bore) → ${BORE_HOST}:${LIVE_PORT}"
+      echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
+    else
+      echo "[tunnel] DOWN"
+    fi
+    ;;
+
+  sync-port)
+    git -C "$REPO_DIR" update-index --assume-unchanged bore-port.txt 2>/dev/null || true
+    LIVE_PORT=""
+    # Try systemd journal first
+    if _has_systemd_bore; then
+      LIVE_PORT=$(_systemd_bore_port)
+    fi
+    # Fallback: direct log
+    if [ -z "$LIVE_PORT" ] && [ -f "$LOG" ]; then
+      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
+        | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
+    fi
+    if [ -n "$LIVE_PORT" ]; then
+      echo "[tunnel] Syncing port ${LIVE_PORT} → bore-port.txt + GitHub..."
+      push_port "$LIVE_PORT"
+    else
+      echo "[tunnel] Could not determine live port (is bore running?)"
+      exit 1
+    fi
+    ;;
+
+  fs-bridge-start)  fs_bridge_start  ;;
+  fs-bridge-stop)   fs_bridge_stop   ;;
+  fs-bridge-status) fs_bridge_status ;;
+
+  fs-bridge)
+    SUBCMD="${2:-status}"
+    case "$SUBCMD" in
+      start)  fs_bridge_start  ;;
+      stop)   fs_bridge_stop   ;;
+      status) fs_bridge_status ;;
+      *) echo "Usage: $0 fs-bridge [start|stop|status]"; exit 1 ;;
+    esac
+    ;;
+
+  *)
+    echo "Usage: $0 [up|down|status|sync-port|install-bore|install-cloudflared|fs-bridge]"
+    exit 1
+    ;;
+esac
