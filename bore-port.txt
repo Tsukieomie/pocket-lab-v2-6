@@ -1,8 +1,5 @@
-port=9039
-host=bore.pub
-bore_server=
-ssh=active
-updated=2026-04-24T19:10:20Z
-machine=perplexity-computer-detected
-status=detected_by_sandbox_scan_needs_key_sync
-
+port=40069
+host=188.93.146.98
+ssh=ssh -p 40069 user@188.93.146.98
+updated=2026-04-24T20:12:41Z
+machine=perplexity-computer-linux
