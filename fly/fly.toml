@@ -3,7 +3,10 @@ app = "pocket-lab-bore"
 primary_region = "ord"  # Chicago — closest free-tier region for US East
 
 [build]
-  dockerfile = "Dockerfile"
+  image = "ekzhang/bore:latest"
+
+[processes]
+  app = "bore server --secret \"$BORE_SECRET\" --min-port 40000 --max-port 40100"
 
 [[services]]
   internal_port = 7835
