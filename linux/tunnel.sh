@@ -258,8 +258,16 @@ case "$CMD" in
     ;;
 
   up)
+    # Kill any stale bore process first (prevents 'already running' false positive)
+    if pgrep -f "bore.*local.*22" >/dev/null 2>&1; then
+      echo "[tunnel] Killing stale bore process..."
+      pkill -f "bore.*local.*22" 2>/dev/null || true
+      sleep 1
+    fi
+
     # ── Prefer bore-tunnel systemd service ──
     if _has_systemd_bore; then
+      systemctl --user reset-failed bore-tunnel.service 2>/dev/null || true
       systemctl --user start bore-tunnel.service 2>&1 || true
       LIVE_PORT=""
       for i in $(seq 1 20); do
@@ -283,11 +291,6 @@ case "$CMD" in
       echo "[tunnel] bore not found — installing..."
       install_bore
       BORE_BIN="${HOME}/.local/bin/bore"
-    fi
-
-    if pgrep -f "bore local 22" >/dev/null 2>&1; then
-      echo "[tunnel] Already running."
-      exit 0
     fi
 
     # Resolve IP (bore needs IP, not hostname, on some builds)
