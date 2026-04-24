@@ -1,5 +1,5 @@
-port=cloudflared
-host=being-foods-murray-feels.trycloudflare.com
-ssh=ssh -o ProxyCommand='cloudflared access tcp --hostname %h' kenny@being-foods-murray-feels.trycloudflare.com
-updated=2026-04-24T14:28:33Z
-machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
+port=40030
+host=188.93.146.98
+ssh=ssh -p 40030 user@188.93.146.98
+updated=2026-04-24T17:11:21Z
+machine=e2b.local
