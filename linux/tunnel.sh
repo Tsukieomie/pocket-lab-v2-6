@@ -568,28 +568,60 @@ machine=$(hostname)
 tunnel=cloudflared
 PORTFILE
       echo "[tunnel] bore-port.txt updated → cloudflared host=${CF_HOST_LIVE}"
-      # Push to GitHub
-      REPO_CF="Tsukieomie/pocket-lab-v2-6"
-      FILE_CF="bore-port.txt"
-      ENCODED_CF=$(base64 -w0 < "$REPO_DIR/bore-port.txt" 2>/dev/null || base64 < "$REPO_DIR/bore-port.txt")
-      PUSH_OK_CF=false
-      if command -v gh >/dev/null 2>&1 && gh api user --jq '.login' >/dev/null 2>&1; then
-        SHA_CF=$(gh api "repos/${REPO_CF}/contents/${FILE_CF}" --jq '.sha' 2>/dev/null || echo "")
-        if [ -n "$SHA_CF" ]; then
-          gh api "repos/${REPO_CF}/contents/${FILE_CF}" -X PUT \
-            -f message="tunnel: cloudflared hostname ${CF_HOST_LIVE}" \
-            -f content="$ENCODED_CF" \
-            -f sha="$SHA_CF" \
-            --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK_CF=true || true
-        else
-          gh api "repos/${REPO_CF}/contents/${FILE_CF}" -X PUT \
-            -f message="tunnel: cloudflared hostname ${CF_HOST_LIVE}" \
-            -f content="$ENCODED_CF" \
-            --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK_CF=true || true
+      # Push to GitHub — try gh CLI first, then curl+GH_TOKEN fallback
+      _cf_github_push() {
+        local REPO_CF="Tsukieomie/pocket-lab-v2-6"
+        local FILE_CF="bore-port.txt"
+        local MSG_CF="tunnel: cloudflared hostname ${CF_HOST_LIVE} @ $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        local ENCODED_CF
+        ENCODED_CF=$(base64 -w0 < "$REPO_DIR/bore-port.txt" 2>/dev/null || base64 < "$REPO_DIR/bore-port.txt")
+        local SHA_CF="" PUSH_OK_CF=false
+
+        # Path 1 — gh CLI (authenticated)
+        if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+          SHA_CF=$(gh api "repos/${REPO_CF}/contents/${FILE_CF}" --jq '.sha' 2>/dev/null || echo "")
+          if [ -n "$SHA_CF" ]; then
+            gh api "repos/${REPO_CF}/contents/${FILE_CF}" -X PUT \
+              -f message="$MSG_CF" -f content="$ENCODED_CF" -f sha="$SHA_CF" \
+              --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK_CF=true || true
+          else
+            gh api "repos/${REPO_CF}/contents/${FILE_CF}" -X PUT \
+              -f message="$MSG_CF" -f content="$ENCODED_CF" \
+              --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK_CF=true || true
+          fi
         fi
-      fi
-      $PUSH_OK_CF && echo "[tunnel] GitHub bore-port.txt synced ✓ (cloudflared host=${CF_HOST_LIVE})" \
-        || echo "[tunnel] GitHub push skipped (non-fatal)"
+
+        # Path 2 — curl + GH_TOKEN from ~/.bore_env or ~/.bore-github-token
+        if ! $PUSH_OK_CF; then
+          local TOKEN=""
+          TOKEN=$(_gh_token)
+          [ -z "$TOKEN" ] && [ -f "${HOME}/.bore-github-token" ] && TOKEN=$(cat "${HOME}/.bore-github-token")
+          if [ -n "$TOKEN" ]; then
+            SHA_CF=$(curl -sf --max-time 8 \
+              -H "Authorization: token ${TOKEN}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${REPO_CF}/contents/${FILE_CF}" \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || echo "")
+            local PAYLOAD
+            if [ -n "$SHA_CF" ]; then
+              PAYLOAD="{\"message\":\"${MSG_CF}\",\"content\":\"${ENCODED_CF}\",\"sha\":\"${SHA_CF}\"}"
+            else
+              PAYLOAD="{\"message\":\"${MSG_CF}\",\"content\":\"${ENCODED_CF}\"}"
+            fi
+            curl -sf --max-time 10 -X PUT \
+              -H "Authorization: token ${TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "https://api.github.com/repos/${REPO_CF}/contents/${FILE_CF}" >/dev/null \
+              && PUSH_OK_CF=true || true
+          fi
+        fi
+
+        $PUSH_OK_CF \
+          && echo "[tunnel] GitHub bore-port.txt synced ✓ (cloudflared host=${CF_HOST_LIVE})" \
+          || echo "[tunnel] GitHub push failed — no gh auth and no GH_TOKEN in ~/.bore_env"
+      }
+      _cf_github_push
       exit 0
     fi
 
