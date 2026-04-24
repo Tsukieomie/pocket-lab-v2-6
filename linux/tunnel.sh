@@ -165,44 +165,64 @@ PORTFILE
   # Prevent 'git pull' conflicts — bore-port.txt is runtime state, not source.
   git -C "$REPO_DIR" update-index --assume-unchanged bore-port.txt 2>/dev/null || true
 
-  # ── 2. Resolve GitHub token ──
+  # ── 2. Resolve GitHub token / gh CLI ──
   local GH_TOKEN=""
   GH_TOKEN=$(_gh_token)
   if [ -z "$GH_TOKEN" ] && [ -f "${HOME}/.bore-github-token" ]; then
     GH_TOKEN=$(cat "${HOME}/.bore-github-token")
   fi
-  if [ -z "$GH_TOKEN" ]; then
-    echo "[tunnel] No GH_TOKEN found — skipping GitHub push (bore-port.txt local only)"
-    return 0
-  fi
 
   # ── 3. Push to GitHub atomically ──
+  # Prefer `gh api` (Perplexity Computer connector) over raw curl+token.
+  # Fall back to curl+GH_TOKEN if gh is not available.
   local REPO="Tsukieomie/pocket-lab-v2-6"
   local FILE="bore-port.txt"
   local ENCODED
   ENCODED=$(base64 -w 0 < "$REPO_DIR/bore-port.txt" 2>/dev/null || base64 < "$REPO_DIR/bore-port.txt")
-  local SHA
-  SHA=$(curl -sf --max-time 8 \
-    -H "Authorization: token ${GH_TOKEN}" \
-    -H "Accept: application/vnd.github.v3+json" \
-    "https://api.github.com/repos/${REPO}/contents/${FILE}" \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || echo "")
-
-  local PAYLOAD
-  if [ -n "$SHA" ]; then
-    PAYLOAD="{\"message\":\"tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\",\"sha\":\"${SHA}\"}"
-  else
-    PAYLOAD="{\"message\":\"tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\"}"
-  fi
-
   local PUSH_OK=false
-  curl -sf --max-time 10 -X PUT \
-    -H "Authorization: token ${GH_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "$PAYLOAD" \
-    "https://api.github.com/repos/${REPO}/contents/${FILE}" > /dev/null \
-    && PUSH_OK=true \
-    || echo "[tunnel] GitHub push failed (non-fatal) — local bore-port.txt is current"
+
+  if command -v gh >/dev/null 2>&1 && gh api user --jq '.login' >/dev/null 2>&1; then
+    # gh api path — works with Perplexity Computer connector token
+    local SHA
+    SHA=$(gh api "repos/${REPO}/contents/${FILE}" --jq '.sha' 2>/dev/null || echo "")
+    if [ -n "$SHA" ]; then
+      gh api "repos/${REPO}/contents/${FILE}" -X PUT \
+        -f message="tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}" \
+        -f content="${ENCODED}" \
+        -f sha="${SHA}" \
+        --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK=true || true
+    else
+      gh api "repos/${REPO}/contents/${FILE}" -X PUT \
+        -f message="tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}" \
+        -f content="${ENCODED}" \
+        --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK=true || true
+    fi
+    $PUSH_OK || echo "[tunnel] gh api push failed (non-fatal) — local bore-port.txt is current"
+  elif [ -n "$GH_TOKEN" ]; then
+    # Raw curl fallback
+    local SHA
+    SHA=$(curl -sf --max-time 8 \
+      -H "Authorization: token ${GH_TOKEN}" \
+      -H "Accept: application/vnd.github.v3+json" \
+      "https://api.github.com/repos/${REPO}/contents/${FILE}" \
+      | python3 -c "import sys,json; print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || echo "")
+    local PAYLOAD
+    if [ -n "$SHA" ]; then
+      PAYLOAD="{\"message\":\"tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\",\"sha\":\"${SHA}\"}"
+    else
+      PAYLOAD="{\"message\":\"tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\"}"
+    fi
+    curl -sf --max-time 10 -X PUT \
+      -H "Authorization: token ${GH_TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD" \
+      "https://api.github.com/repos/${REPO}/contents/${FILE}" > /dev/null \
+      && PUSH_OK=true \
+      || echo "[tunnel] GitHub push failed (non-fatal) — local bore-port.txt is current"
+  else
+    echo "[tunnel] No GH_TOKEN and gh CLI not available — skipping GitHub push (bore-port.txt local only)"
+    return 0
+  fi
 
   $PUSH_OK && echo "[tunnel] GitHub bore-port.txt synced ✓ (port=${PORT_VAL} host=${BORE_HOST})" || true
 }
