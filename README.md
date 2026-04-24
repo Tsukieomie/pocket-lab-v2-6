@@ -59,9 +59,17 @@ Scripts are designed for iSH (which runs as root). On a normal Linux user accoun
 > **SSH key location:** On a normal Linux account always use `~/.ssh/` (e.g. `/home/kenny/.ssh/`). Do **not** use `/root/.ssh/` — that requires sudo and is not where sshd looks for your user's authorized keys.
 
 ```sh
-# One-time setup (installs bore + tunnel script + ~/.bore_env template
-# AND adds Perplexity Computer pubkey to ~/.ssh/authorized_keys automatically)
+# One-time setup (installs bore + tunnel script + ~/.bore_env template,
+# adds Perplexity Computer pubkey to ~/.ssh/authorized_keys, and installs
+# the Perplexity Comet Electron wrapper into ~/perplexity-linux-wrapper)
 bash ~/pocket-lab-v2-6/linux/install.sh
+
+# Install / refresh ONLY the Perplexity Comet Electron wrapper
+# (idempotent; needs node+npm — installer prints hints if missing)
+bash ~/pocket-lab-v2-6/linux/install-computer-wrapper.sh
+
+# Launch Perplexity Computer / Comet
+bash ~/perplexity-linux-wrapper/launch-computer.sh
 
 # Start the tunnel (exposes local SSH port 22 via bore)
 pocket-tunnel.sh up
@@ -73,7 +81,15 @@ pocket-tunnel.sh down
 
 # Check tunnel status
 pocket-tunnel.sh status
+
+# List available AI models via the multi-provider client
+python3 ~/pocket-lab-v2-6/parallel_ai.py --list-models
 ```
+
+> **Tunnel ports:** auto-fallback tries `2222 → 8443` (matching the shipped
+> `bore-custom-*` binaries). 443 is opt-in only — set `BORE_CTRL_PORT=443`
+> in `~/.bore_env` and install upstream bore with
+> `bash ~/pocket-lab-v2-6/linux/tunnel.sh install-bore`.
 
 Config lives in `~/.bore_env` (not `/root/.bore_env`):
 

@@ -56,6 +56,60 @@ git clone https://github.com/Tsukieomie/pocket-lab-v2-6.git
 bash pocket-lab-v2-6/linux/install.sh
 ```
 
+## Vivobook — exact commands
+
+Reference setup on `kenny@kenny-VivoBook-ASUSLaptop-X513IA-M513IA` (Ubuntu).
+
+```bash
+# 1. Clone (or pull if already cloned)
+cd ~ && [ -d pocket-lab-v2-6 ] \
+  && git -C pocket-lab-v2-6 pull --ff-only \
+  || git clone https://github.com/Tsukieomie/pocket-lab-v2-6.git
+
+# 2. Full Linux setup (tunnel + authorized_keys + Comet wrapper)
+bash ~/pocket-lab-v2-6/linux/install.sh
+
+# 3. Install / refresh ONLY the Perplexity Computer Electron wrapper
+#    (idempotent — safe to rerun anytime main.js / preload.js change)
+bash ~/pocket-lab-v2-6/linux/install-computer-wrapper.sh
+
+# 4. Launch Perplexity Computer / Comet
+bash ~/perplexity-linux-wrapper/launch-computer.sh
+# or double-click ~/Desktop/Perplexity\ Comet.desktop
+
+# 5. Bring the bore tunnel up (so Perplexity can SSH in)
+bash ~/pocket-lab-v2-6/linux/tunnel.sh up
+bash ~/pocket-lab-v2-6/linux/tunnel.sh status
+
+# 6. Run the connector (pushes current bore port + opens Perplexity)
+~/.local/bin/perplexity-connect.sh
+
+# 7. List available models via the multi-provider client
+python3 ~/pocket-lab-v2-6/parallel_ai.py --list-models
+```
+
+### Prerequisites
+
+`install-computer-wrapper.sh` requires `node` and `npm`. On a fresh Vivobook:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+The wrapper installer will print these hints itself and exit cleanly if
+`node` / `npm` are missing — no partial install.
+
+### Tunnel control-port note
+
+The shipped custom bore binaries (`bore-custom-2222`, `bore-custom-8443`)
+each dial a single hardcoded control port. The automatic fallback list is
+`2222 → 8443` only; 443 is **not** tried unless you explicitly set
+`BORE_CTRL_PORT=443` in `~/.bore_env` *and* have upstream `bore` installed
+(`bash ~/pocket-lab-v2-6/linux/tunnel.sh install-bore`). This avoids the
+earlier bug where logs claimed `ctrl=443` while the 8443 binary was being
+invoked.
+
 ---
 
 ## Filesystem Bridge (fs-bridge)
