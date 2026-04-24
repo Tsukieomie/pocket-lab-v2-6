@@ -341,30 +341,92 @@ case "$CMD" in
     ;;
 
   status)
-    # bore systemd
-    if _has_systemd_bore && systemctl --user is-active --quiet bore-tunnel.service 2>/dev/null; then
-      LIVE_PORT=$(_systemd_bore_port)
-      [ -z "$LIVE_PORT" ] && LIVE_PORT="(port pending)"
-      echo "[tunnel] RUNNING (systemd/bore) → ${BORE_HOST}:${LIVE_PORT}"
-      echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
-      LOCAL_PORT=$(grep '^port=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "unknown")
-      if [ "$LOCAL_PORT" != "$LIVE_PORT" ]; then
-        echo "[tunnel] WARNING: bore-port.txt has port=${LOCAL_PORT} but live port is ${LIVE_PORT}"
-        echo "[tunnel] Run: bash $0 sync-port"
-      else
-        echo "[tunnel] bore-port.txt in sync ✓"
-      fi
-      exit 0
+    echo "━━━ Pocket Lab Tunnel Status ━━━"
+
+    # ── 1. Process / systemd state ──────────────────────────
+    BORE_PID=$(pgrep -f "bore.*local.*22" | head -1 || true)
+    CF_PID=$(pgrep -f "cloudflared.*tcp.*22" | head -1 || true)
+    SYSTEMD_BORE_STATE=""
+    SYSTEMD_CF_STATE=""
+    if _has_systemd_bore; then
+      SYSTEMD_BORE_STATE=$(systemctl --user is-active bore-tunnel.service 2>/dev/null || echo "inactive")
     fi
-    # direct bore process
-    if pgrep -f "bore local 22" >/dev/null 2>&1; then
-      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
-        | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || echo "?")
-      echo "[tunnel] RUNNING (bore) → ${BORE_HOST}:${LIVE_PORT}"
-      echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
+    if _has_systemd_cf; then
+      SYSTEMD_CF_STATE=$(systemctl --user is-active cloudflared-tunnel.service 2>/dev/null || echo "inactive")
+    fi
+
+    if [ -n "$BORE_PID" ]; then
+      echo "[process]  bore      PID=${BORE_PID}  (systemd: ${SYSTEMD_BORE_STATE:-n/a})"
+    elif [ -n "$SYSTEMD_BORE_STATE" ]; then
+      echo "[process]  bore      PID=none  (systemd: ${SYSTEMD_BORE_STATE})"
     else
-      echo "[tunnel] DOWN"
+      echo "[process]  bore      DOWN"
     fi
+
+    if [ -n "$CF_PID" ]; then
+      echo "[process]  cloudflared  PID=${CF_PID}  (systemd: ${SYSTEMD_CF_STATE:-n/a})"
+    fi
+
+    # ── 2. bore-port.txt (last published state) ─────────────
+    PORT_FILE="$REPO_DIR/bore-port.txt"
+    if [ -f "$PORT_FILE" ]; then
+      SAVED_PORT=$(grep '^port=' "$PORT_FILE" | cut -d= -f2)
+      SAVED_HOST=$(grep '^host=' "$PORT_FILE" | cut -d= -f2)
+      SAVED_SSH=$(grep  '^ssh='  "$PORT_FILE" | cut -d= -f2-)
+      SAVED_TS=$(grep   '^updated=' "$PORT_FILE" | cut -d= -f2)
+      echo "[port.txt] port=${SAVED_PORT}  host=${SAVED_HOST}  updated=${SAVED_TS}"
+      echo "[port.txt] ssh → ${SAVED_SSH}"
+    else
+      echo "[port.txt] bore-port.txt not found"
+      SAVED_PORT=""
+      SAVED_HOST=""
+    fi
+
+    # ── 3. Live port from journal / log ─────────────────────
+    LIVE_PORT=""
+    if _has_systemd_bore && [ "$SYSTEMD_BORE_STATE" = "active" ]; then
+      LIVE_PORT=$(_systemd_bore_port)
+    fi
+    if [ -z "$LIVE_PORT" ] && [ -f "$LOG" ]; then
+      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
+        | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
+    fi
+    if [ -n "$LIVE_PORT" ]; then
+      echo "[live]     bore port=${LIVE_PORT}"
+      if [ "${SAVED_PORT:-}" != "$LIVE_PORT" ]; then
+        echo "[live]     WARNING: bore-port.txt shows port=${SAVED_PORT} but live is ${LIVE_PORT} — run: bash $0 sync-port"
+      else
+        echo "[live]     bore-port.txt in sync ✓"
+      fi
+    else
+      echo "[live]     no live bore port detected"
+    fi
+
+    # ── 4. Reachability check ────────────────────────────────
+    CHECK_PORT="${LIVE_PORT:-${SAVED_PORT:-}}"
+    CHECK_HOST="${SAVED_HOST:-${BORE_HOST}}"
+    if [ -n "$CHECK_PORT" ] && echo "$CHECK_PORT" | grep -qE '^[0-9]+$'; then
+      echo "[reach]    checking ${CHECK_HOST}:${CHECK_PORT} ..."
+      if timeout 5 bash -c "echo >/dev/tcp/${CHECK_HOST}/${CHECK_PORT}" 2>/dev/null; then
+        echo "[reach]    ✓ TCP reachable — tunnel is live"
+      else
+        echo "[reach]    ✗ TCP unreachable — bore server may be down or port expired"
+      fi
+    else
+      echo "[reach]    skipped (no numeric port available)"
+    fi
+
+    # ── 5. Last 5 bore log lines ─────────────────────────────
+    if [ -f "$LOG" ]; then
+      echo "[log]      last 5 lines of $LOG:"
+      tail -5 "$LOG" | sed 's/^/           /'
+    fi
+    if _has_systemd_bore && [ "$SYSTEMD_BORE_STATE" != "inactive" ]; then
+      echo "[journal]  last 5 lines of bore-tunnel.service:"
+      journalctl --user -u bore-tunnel.service -n 5 --no-pager 2>/dev/null \
+        | sed 's/^/           /' || true
+    fi
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     ;;
 
   sync-port)
