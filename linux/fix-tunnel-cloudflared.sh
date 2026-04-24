@@ -170,6 +170,46 @@ fi
 
 $PUSH_OK && echo "  GitHub bore-port.txt synced ✓" || echo "  GitHub push skipped (non-fatal)"
 
+# ── Also push to tunnel-host.txt (tracked, API-only, no merge conflicts) ──
+# Perplexity Computer reads tunnel-host.txt from the repo each session
+# to get the live hostname automatically — no pasting required.
+TH_FILE="tunnel-host.txt"
+TH_CONTENT=$(printf 'host=%s\nssh=ssh -o ProxyCommand="cloudflared access tcp --hostname https://%s" %s@localhost\nupdated=%s\nmachine=%s\ntunnel=cloudflared\n' \
+  "$CF_HOST" "$CF_HOST" "$(whoami)" "$TIMESTAMP" "$(hostname)")
+TH_ENCODED=$(printf '%s' "$TH_CONTENT" | base64 -w0 2>/dev/null || printf '%s' "$TH_CONTENT" | base64)
+TH_MSG="tunnel: cloudflared up ${CF_HOST} @ ${TIMESTAMP}"
+TH_PUSH_OK=false
+
+if command -v gh >/dev/null 2>&1 && gh api user --jq '.login' >/dev/null 2>&1; then
+  TH_SHA=$(gh api "repos/${REPO}/contents/${TH_FILE}" --jq '.sha' 2>/dev/null || echo "")
+  if [ -n "$TH_SHA" ]; then
+    gh api "repos/${REPO}/contents/${TH_FILE}" -X PUT \
+      -f message="$TH_MSG" -f content="$TH_ENCODED" -f sha="$TH_SHA" \
+      --jq '.commit.sha' >/dev/null 2>&1 && TH_PUSH_OK=true || true
+  else
+    gh api "repos/${REPO}/contents/${TH_FILE}" -X PUT \
+      -f message="$TH_MSG" -f content="$TH_ENCODED" \
+      --jq '.commit.sha' >/dev/null 2>&1 && TH_PUSH_OK=true || true
+  fi
+elif [ -n "${GH_TOKEN:-}" ]; then
+  TH_SHA=$(curl -sf --max-time 8 \
+    -H "Authorization: token $GH_TOKEN" \
+    "https://api.github.com/repos/${REPO}/contents/${TH_FILE}" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || echo "")
+  TH_PAYLOAD="{\"message\":\"${TH_MSG}\",\"content\":\"${TH_ENCODED}\""
+  [ -n "$TH_SHA" ] && TH_PAYLOAD="${TH_PAYLOAD},\"sha\":\"${TH_SHA}\""
+  TH_PAYLOAD="${TH_PAYLOAD}}"
+  curl -sf --max-time 10 -X PUT \
+    -H "Authorization: token $GH_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$TH_PAYLOAD" \
+    "https://api.github.com/repos/${REPO}/contents/${TH_FILE}" >/dev/null \
+    && TH_PUSH_OK=true || true
+fi
+$TH_PUSH_OK \
+  && echo "  GitHub tunnel-host.txt synced ✓ (Perplexity Computer will auto-read this)" \
+  || echo "  tunnel-host.txt push skipped (non-fatal)"
+
 # ── Done ─────────────────────────────────────────────────────
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
@@ -178,7 +218,8 @@ echo "╠═══════════════════════�
 echo "║  Hostname: ${CF_HOST}"
 echo "║"
 echo "║  To SSH in, Perplexity Computer will use:"
-echo "║    ProxyCommand cloudflared access tcp"
+echo "║    ProxyCommand cloudflared access tcp
+║  (hostname auto-saved → tunnel-host.txt on GitHub)"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
 echo "Tunnel will auto-restart on reboot (systemd user service)."

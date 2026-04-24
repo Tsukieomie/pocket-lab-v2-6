@@ -1,0 +1,5 @@
+host=none
+ssh=none
+updated=never
+machine=none
+tunnel=none

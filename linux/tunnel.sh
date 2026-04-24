@@ -230,6 +230,74 @@ PORTFILE
 # Keep old alias
 push_port_to_github() { push_port "$1"; }
 
+# ── push_tunnel_host: push cloudflared hostname to tracked tunnel-host.txt ──
+# tunnel-host.txt IS tracked by git (unlike bore-port.txt) and is pushed
+# purely via the GitHub API — never via git commit — so it never causes
+# merge conflicts. Perplexity Computer reads this file to get the live
+# hostname each session without the user having to paste anything.
+push_tunnel_host() {
+  local CF_HOST="$1"
+  local TIMESTAMP
+  TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  local USERNAME
+  USERNAME=$(whoami)
+  local REPO="Tsukieomie/pocket-lab-v2-6"
+  local FILE="tunnel-host.txt"
+
+  # Build file contents
+  local CONTENT
+  CONTENT=$(printf 'host=%s\nssh=ssh -o ProxyCommand="cloudflared access tcp --hostname https://%s" %s@localhost\nupdated=%s\nmachine=%s\ntunnel=cloudflared\n' \
+    "$CF_HOST" "$CF_HOST" "$USERNAME" "$TIMESTAMP" "$(hostname)")
+  local ENCODED
+  ENCODED=$(printf '%s' "$CONTENT" | base64 -w0 2>/dev/null || printf '%s' "$CONTENT" | base64)
+  local MSG="tunnel: cloudflared up ${CF_HOST} @ ${TIMESTAMP}"
+
+  # ── Path 1: gh CLI ──
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    local SHA
+    SHA=$(gh api "repos/${REPO}/contents/${FILE}" --jq '.sha' 2>/dev/null || echo "")
+    local PUSH_OK=false
+    if [ -n "$SHA" ]; then
+      gh api "repos/${REPO}/contents/${FILE}" -X PUT \
+        -f message="$MSG" -f content="$ENCODED" -f sha="$SHA" \
+        --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK=true || true
+    else
+      gh api "repos/${REPO}/contents/${FILE}" -X PUT \
+        -f message="$MSG" -f content="$ENCODED" \
+        --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK=true || true
+    fi
+    $PUSH_OK && echo "[tunnel] tunnel-host.txt synced to GitHub ✓ (${CF_HOST})" && return 0 || true
+  fi
+
+  # ── Path 2: curl + GH_TOKEN ──
+  local TOKEN
+  TOKEN=$(_gh_token)
+  [ -z "$TOKEN" ] && [ -f "${HOME}/.bore-github-token" ] && TOKEN=$(cat "${HOME}/.bore-github-token")
+  if [ -n "$TOKEN" ]; then
+    local SHA
+    SHA=$(curl -sf --max-time 8 \
+      -H "Authorization: token ${TOKEN}" \
+      -H "Accept: application/vnd.github.v3+json" \
+      "https://api.github.com/repos/${REPO}/contents/${FILE}" \
+      | python3 -c "import sys,json; print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || echo "")
+    local PAYLOAD
+    if [ -n "$SHA" ]; then
+      PAYLOAD="{\"message\":\"${MSG}\",\"content\":\"${ENCODED}\",\"sha\":\"${SHA}\"}"
+    else
+      PAYLOAD="{\"message\":\"${MSG}\",\"content\":\"${ENCODED}\"}"
+    fi
+    curl -sf --max-time 10 -X PUT \
+      -H "Authorization: token ${TOKEN}" \
+      -H "Content-Type: application/json" \
+      -d "$PAYLOAD" \
+      "https://api.github.com/repos/${REPO}/contents/${FILE}" >/dev/null \
+      && echo "[tunnel] tunnel-host.txt synced to GitHub ✓ (${CF_HOST}) [curl]" && return 0 \
+      || echo "[tunnel] tunnel-host.txt GitHub push failed (non-fatal)"
+  else
+    echo "[tunnel] No gh auth and no GH_TOKEN — tunnel-host.txt not pushed (set GH_TOKEN in ~/.bore_env)"
+  fi
+}
+
 # ── install-bore ─────────────────────────────────────────────
 install_bore() {
   echo "[tunnel] Installing bore binary to ~/.local/bin/ ..."
@@ -568,6 +636,8 @@ machine=$(hostname)
 tunnel=cloudflared
 PORTFILE
       echo "[tunnel] bore-port.txt updated → cloudflared host=${CF_HOST_LIVE}"
+      # Push live hostname to tunnel-host.txt (tracked file, API-only, no merge conflicts)
+      push_tunnel_host "${CF_HOST_LIVE}" || true
       # Push to GitHub — try gh CLI first, then curl+GH_TOKEN fallback
       _cf_github_push() {
         local REPO_CF="Tsukieomie/pocket-lab-v2-6"
