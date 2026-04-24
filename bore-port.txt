@@ -1,5 +1,5 @@
-port=40069
+port=40047
 host=188.93.146.98
-ssh=ssh -p 40069 user@188.93.146.98
-updated=2026-04-24T20:12:41Z
-machine=perplexity-computer-linux
+ssh=ssh -p 40047 user@188.93.146.98
+updated=2026-04-24T20:19:54Z
+machine=e2b.local
