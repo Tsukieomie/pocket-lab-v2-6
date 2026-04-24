@@ -28,6 +28,7 @@ LOG="/tmp/bore-tunnel-linux.log"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 _bore_host() { grep '^BORE_HOST=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo "188.93.146.98"; }
+# bore-custom-2222 binary uses port 443 as control port (bypasses ISP blocks)
 # Resolve hostname to IPv4 only — avoids IPv6 timeout on networks that block it.
 # Falls back to the hostname if resolution fails.
 _bore_host_ipv4() {
