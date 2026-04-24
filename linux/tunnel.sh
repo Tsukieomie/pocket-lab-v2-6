@@ -15,10 +15,14 @@
 set -eu
 
 BORE_ENV="${HOME}/.bore_env"
-BORE_BIN="${HOME}/.local/bin/bore"
-# Also check system path
-if command -v bore >/dev/null 2>&1; then
+# Prefer custom bore binary (control port patched to 2222) from repo
+REPO_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -x "${REPO_DIR_EARLY}/bore-custom-2222" ]; then
+  BORE_BIN="${REPO_DIR_EARLY}/bore-custom-2222"
+elif command -v bore >/dev/null 2>&1; then
   BORE_BIN=$(command -v bore)
+else
+  BORE_BIN="${HOME}/.local/bin/bore"
 fi
 LOG="/tmp/bore-tunnel-linux.log"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
