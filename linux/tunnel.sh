@@ -325,6 +325,7 @@ case "$CMD" in
         echo "[tunnel] UP (systemd/bore) → ${BORE_HOST}:${LIVE_PORT}"
         echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
         push_port "$LIVE_PORT"
+        fs_bridge_start
         exit 0
       else
         echo "[tunnel] bore-tunnel.service did not report a port within 20s; falling back to direct"
@@ -384,6 +385,7 @@ case "$CMD" in
       echo "[tunnel] UP → ${BORE_HOST}:${LIVE_PORT} (ctrl=${USED_PORT})"
       echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
       push_port "$LIVE_PORT"
+      fs_bridge_start
     else
       echo "[tunnel] FAILED on all ports (2222, 8443, 443) — check $LOG"
       tail -20 "$LOG"
