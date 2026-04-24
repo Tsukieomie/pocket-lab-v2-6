@@ -1,0 +1,5 @@
+port=cloudflared
+host=menus-significant-stylus-nitrogen.trycloudflare.com
+ssh=ssh -o ProxyCommand='cloudflared access tcp --hostname %h' kenny@menus-significant-stylus-nitrogen.trycloudflare.com
+updated=2026-04-24T14:09:12Z
+machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
