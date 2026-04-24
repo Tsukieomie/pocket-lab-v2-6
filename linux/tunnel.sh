@@ -74,6 +74,9 @@ updated=${TIMESTAMP}
 machine=$(hostname)
 PORTFILE
   echo "[tunnel] bore-port.txt updated → host=${HOSTNAME_VAL}"
+  # Prevent 'git pull' conflicts — bore-port.txt is runtime state, not source.
+  # GitHub API is the source of truth; local copy is ephemeral.
+  git -C "$REPO_DIR" update-index --assume-unchanged bore-port.txt 2>/dev/null || true
 
   # ── 2. Resolve GitHub token ──
   local GH_TOKEN=""
@@ -314,6 +317,8 @@ case "$CMD" in
     ;;
 
   sync-port)
+    # Silence git-pull conflicts on bore-port.txt for future pulls
+    git -C "$REPO_DIR" update-index --assume-unchanged bore-port.txt 2>/dev/null || true
     # Try journal first (works whether called manually or from ExecStartPost)
     LIVE_HOST=$(_systemd_tunnel_url)
     # Fallback: scan the direct-launch log file
