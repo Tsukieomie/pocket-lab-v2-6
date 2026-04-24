@@ -1,5 +1,6 @@
-port=40058
-host=188.93.146.98
-ssh=ssh -p 40058 user@188.93.146.98
-updated=2026-04-24T20:27:22Z
-machine=perplexity-computer-linux
+port=cloudflared
+host=acquire-invited-labour-shield.trycloudflare.com
+ssh=ssh -o ProxyCommand="cloudflared access tcp --hostname https://acquire-invited-labour-shield.trycloudflare.com" user@localhost
+updated=2026-04-24T20:38:27Z
+machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
+tunnel=cloudflared
