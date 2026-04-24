@@ -1,5 +1,8 @@
 port=
-host=188.93.146.98
-ssh=
-updated=2026-04-24T18:29:40Z
-machine=pending
+host=34.11.134.241
+bore_server=34.11.134.241:7835
+bore_secret=pocketlab2026
+ssh=pending
+updated=2026-04-24T18:40:32Z
+machine=perplexity-computer-sandbox
+status=waiting_for_vivobook_to_connect_bore_tunnel_here
