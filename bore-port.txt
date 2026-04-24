@@ -1,7 +1,8 @@
-port=
-host=
+port=9039
+host=bore.pub
 bore_server=
-ssh=unknown
-updated=
-status=waiting
+ssh=active
+updated=2026-04-24T19:10:20Z
+machine=perplexity-computer-detected
+status=detected_by_sandbox_scan_needs_key_sync
 
