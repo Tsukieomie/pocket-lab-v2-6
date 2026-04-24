@@ -1,0 +1,14 @@
+{
+  "name": "pocket-lab-fs-bridge",
+  "version": "1.0.0",
+  "description": "Pocket Lab filesystem bridge — localhost HTTP server for Perplexity Computer access",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["pocket-lab", "filesystem", "bridge"],
+  "license": "MIT"
+}

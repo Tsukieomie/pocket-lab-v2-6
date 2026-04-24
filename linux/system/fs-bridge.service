@@ -1,0 +1,34 @@
+# linux/system/fs-bridge.service — Pocket Lab Filesystem Bridge
+# systemd user unit — install to ~/.config/systemd/user/
+#
+# Install:
+#   cp ~/pocket-lab-v2-6/linux/system/fs-bridge.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now fs-bridge.service
+#
+# Logs:
+#   journalctl --user -u fs-bridge.service -f
+#   cat /tmp/fs-bridge.log
+
+[Unit]
+Description=Pocket Lab Filesystem Bridge (Perplexity Computer access)
+Documentation=https://github.com/Tsukieomie/pocket-lab-v2-6
+After=network.target bore-tunnel.service
+Wants=bore-tunnel.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/pocket-lab-v2-6/linux/fs-bridge
+ExecStart=/usr/bin/env node %h/pocket-lab-v2-6/linux/fs-bridge/server.js
+Restart=on-failure
+RestartSec=5
+
+# Inherit FS_BRIDGE_TOKEN and other settings from ~/.bore_env
+EnvironmentFile=-%h/.bore_env
+
+# Minimal resource limits
+MemoryMax=128M
+CPUQuota=20%
+
+[Install]
+WantedBy=default.target

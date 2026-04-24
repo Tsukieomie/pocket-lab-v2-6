@@ -322,8 +322,79 @@ case "$CMD" in
     fi
     ;;
 
+  fs-bridge-start)
+    fs_bridge_start
+    ;;
+
+  fs-bridge-stop)
+    fs_bridge_stop
+    ;;
+
+  fs-bridge-status)
+    fs_bridge_status
+    ;;
+
+  fs-bridge)
+    # alias: fs-bridge [start|stop|status]
+    SUBCMD="${2:-status}"
+    case "$SUBCMD" in
+      start)  fs_bridge_start  ;;
+      stop)   fs_bridge_stop   ;;
+      status) fs_bridge_status ;;
+      *) echo "Usage: $0 fs-bridge [start|stop|status]"; exit 1 ;;
+    esac
+    ;;
+
   *)
-    echo "Usage: $0 [up|down|status|sync-port|install-bore]"
+    echo "Usage: $0 [up|down|status|sync-port|install-bore|fs-bridge]"
     exit 1
     ;;
 esac
+
+# ── fs-bridge: start/stop/status the Pocket Lab filesystem bridge ────────────
+_fs_bridge_pid() { pgrep -f "node.*fs-bridge/server.js" | head -1 || true; }
+
+fs_bridge_start() {
+  if [ -n "$(_fs_bridge_pid)" ]; then echo "[fs-bridge] Already running."; return 0; fi
+  # Try systemd user service first
+  if systemctl --user list-unit-files fs-bridge.service &>/dev/null 2>&1 | grep -q '^fs-bridge'; then
+    systemctl --user start fs-bridge.service && echo "[fs-bridge] Started (systemd)." && return 0
+  fi
+  # Fallback: direct node
+  BRIDGE="$REPO_DIR/linux/fs-bridge/server.js"
+  if [ ! -f "$BRIDGE" ]; then echo "[fs-bridge] ERROR: $BRIDGE not found"; return 1; fi
+  if ! command -v node &>/dev/null; then echo "[fs-bridge] ERROR: node not found — install Node.js 18+"; return 1; fi
+  node "$BRIDGE" >> /tmp/fs-bridge.log 2>&1 &
+  sleep 1
+  PID=$(_fs_bridge_pid)
+  if [ -n "$PID" ]; then
+    echo "[fs-bridge] Started (pid=$PID) on 127.0.0.1:7779"
+    echo "[fs-bridge] Log: /tmp/fs-bridge.log"
+  else
+    echo "[fs-bridge] FAILED — check /tmp/fs-bridge.log"; return 1
+  fi
+}
+
+fs_bridge_stop() {
+  if systemctl --user is-active --quiet fs-bridge.service 2>/dev/null; then
+    systemctl --user stop fs-bridge.service && echo "[fs-bridge] Stopped (systemd)." && return 0
+  fi
+  PID=$(_fs_bridge_pid)
+  if [ -n "$PID" ]; then kill "$PID" && echo "[fs-bridge] Stopped (pid=$PID)."; else echo "[fs-bridge] Not running."; fi
+}
+
+fs_bridge_status() {
+  PID=$(_fs_bridge_pid)
+  if [ -n "$PID" ]; then
+    PORT=$(ss -tlnp 2>/dev/null | grep "$PID" | grep -oE '127\.0\.0\.1:[0-9]+' | head -1 | cut -d: -f2 || echo "7779")
+    echo "[fs-bridge] RUNNING (pid=$PID, port=${PORT:-7779})"
+    # Quick local health check
+    TOKEN_VAL=$(grep '^FS_BRIDGE_TOKEN=' "${HOME}/.bore_env" 2>/dev/null | cut -d= -f2 || echo "")
+    if [ -n "$TOKEN_VAL" ]; then
+      STATUS=$(curl -sf -H "Authorization: Bearer $TOKEN_VAL" http://127.0.0.1:7779/status 2>/dev/null || echo "{}")
+      echo "[fs-bridge] Health: $STATUS"
+    fi
+  else
+    echo "[fs-bridge] DOWN"
+  fi
+}

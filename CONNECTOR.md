@@ -55,3 +55,84 @@ If the launcher ever disappears (e.g. after a reinstall), restore it with:
 git clone https://github.com/Tsukieomie/pocket-lab-v2-6.git
 bash pocket-lab-v2-6/linux/install.sh
 ```
+
+---
+
+## Filesystem Bridge (fs-bridge)
+
+A localhost HTTP server on the Linux laptop that gives Perplexity Computer
+direct read/write/exec access to the local filesystem — routed over the
+existing bore SSH tunnel. No new open ports.
+
+### Port
+
+`7779` (localhost only — never exposed externally)
+
+### Setup (one-time)
+
+```bash
+# 1. Add token to ~/.bore_env
+echo 'FS_BRIDGE_TOKEN=<random-32-char-secret>' >> ~/.bore_env
+
+# Optional: enable shell exec (needed for running commands remotely)
+echo 'FS_BRIDGE_EXEC_ALLOW=1' >> ~/.bore_env
+
+# 2. Install systemd unit
+mkdir -p ~/.config/systemd/user
+cp ~/pocket-lab-v2-6/linux/system/fs-bridge.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fs-bridge.service
+
+# 3. Verify
+bash ~/pocket-lab-v2-6/linux/tunnel.sh fs-bridge status
+```
+
+### API (called from Perplexity Computer via SSH)
+
+All requests require `Authorization: Bearer <FS_BRIDGE_TOKEN>`.
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/status` | Health check + uptime |
+| GET | `/ls?path=<dir>&hidden=1` | List directory |
+| GET | `/read?path=<file>&encoding=utf8\|base64` | Read file |
+| GET | `/stat?path=<path>` | File/dir metadata |
+| POST | `/write` | Write file `{path, content, encoding?}` |
+| POST | `/mkdir` | Create directory `{path}` |
+| DELETE | `/delete?path=<file>` | Delete file |
+| POST | `/exec` | Run command `{cmd, args?, cwd?, timeout_ms?}` — requires `FS_BRIDGE_EXEC_ALLOW=1` |
+
+### Perplexity Computer reconnect + fs-bridge call pattern
+
+```bash
+# Read the current bore port
+PORT=$(curl -sf https://raw.githubusercontent.com/Tsukieomie/pocket-lab-v2-6/main/bore-port.txt | grep ^port | cut -d= -f2)
+TOKEN=<FS_BRIDGE_TOKEN>
+
+# List home directory
+ssh -o StrictHostKeyChecking=no -p $PORT kenny@188.93.146.98 \
+  "curl -sf -H 'Authorization: Bearer $TOKEN' http://localhost:7779/ls?path=/home/kenny"
+
+# Read a file
+ssh -o StrictHostKeyChecking=no -p $PORT kenny@188.93.146.98 \
+  "curl -sf -H 'Authorization: Bearer $TOKEN' 'http://localhost:7779/read?path=/home/kenny/pocket-lab-v2-6/bore-port.txt'"
+
+# Write a file
+ssh -o StrictHostKeyChecking=no -p $PORT kenny@188.93.146.98 \
+  "curl -sf -X POST -H 'Authorization: Bearer $TOKEN' -H 'Content-Type: application/json' \
+   -d '{\"path\":\"/home/kenny/test.txt\",\"content\":\"hello from Comet\"}' \
+   http://localhost:7779/write"
+
+# Run a command (exec must be enabled)
+ssh -o StrictHostKeyChecking=no -p $PORT kenny@188.93.146.98 \
+  "curl -sf -X POST -H 'Authorization: Bearer $TOKEN' -H 'Content-Type: application/json' \
+   -d '{\"cmd\":\"df -h\"}' http://localhost:7779/exec"
+```
+
+### Security notes
+
+- Server binds only to `127.0.0.1` — never reachable from the internet
+- All paths constrained to `$HOME` (same guard as the Electron wrapper)
+- Token stored in `~/.bore_env` (not committed to this repo)
+- `exec` disabled by default; enable only when needed with `FS_BRIDGE_EXEC_ALLOW=1`
+- Log: `/tmp/fs-bridge.log`
