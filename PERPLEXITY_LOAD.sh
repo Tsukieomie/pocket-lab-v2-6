@@ -244,8 +244,40 @@ echo "   Approval signed. t=$(elapsed)ms"
 # ── GitHub publish: async, non-blocking ──────────────────
 # Does NOT block the open. Lab opens regardless of whether
 # this succeeds. Retry handled by next AUTO_START.
-if [ -n "$GH_TOKEN" ]; then
-  (
+#
+# Auth priority (mirrors tunnel.sh fix, issue #3):
+#   1. gh api  — works in Perplexity Computer sandbox (connector token)
+#   2. curl + GH_TOKEN — fallback for bare Linux with a stored PAT
+#   3. git clone + push — last resort, no token required
+(
+  _gh_api_available() {
+    command -v gh >/dev/null 2>&1 && gh api user --jq '.login' >/dev/null 2>&1
+  }
+
+  if _gh_api_available; then
+    # ── Path A: gh api (Perplexity Computer connector) ──
+    PREV_SHA=$(gh api "repos/$APPROVAL_REPO/contents/approvals/current.json" \
+      --jq '.sha' 2>/dev/null || echo "")
+
+    for FNAME in current.json current.json.sig; do
+      B64=$(base64 -w0 < "/tmp/$FNAME" 2>/dev/null || base64 < "/tmp/$FNAME")
+      if [ "$FNAME" = "current.json" ] && [ -n "$PREV_SHA" ]; then
+        gh api "repos/$APPROVAL_REPO/contents/approvals/$FNAME" -X PUT \
+          -f message="open $RUN_ID" \
+          -f content="$B64" \
+          -f sha="$PREV_SHA" \
+          --jq '.commit.sha' >/dev/null 2>&1 || true
+      else
+        gh api "repos/$APPROVAL_REPO/contents/approvals/$FNAME" -X PUT \
+          -f message="open $RUN_ID" \
+          -f content="$B64" \
+          --jq '.commit.sha' >/dev/null 2>&1 || true
+      fi
+    done
+    echo "GH_PUBLISH=OK (gh api)" > /tmp/gh_publish_status.txt
+
+  elif [ -n "$GH_TOKEN" ]; then
+    # ── Path B: raw curl + GH_TOKEN (bare Linux PAT fallback) ──
     PREV_SHA=$(curl -sf --max-time 5 \
       -H "Authorization: token $GH_TOKEN" \
       -H "Accept: application/vnd.github.v3+json" \
@@ -263,13 +295,10 @@ if [ -n "$GH_TOKEN" ]; then
         -d "{\"message\":\"open $RUN_ID\",\"content\":\"$B64\"$SHA_ARG}" \
         >/dev/null 2>&1 || true
     done
-    echo "GH_PUBLISH=OK" > /tmp/gh_publish_status.txt
-  ) &
-  GH_PID=$!
-  # Not waited on — continues after open
-else
-  # Fallback: git clone + push (slower but no token needed)
-  (
+    echo "GH_PUBLISH=OK (curl)" > /tmp/gh_publish_status.txt
+
+  else
+    # ── Path C: git clone + push (no token required) ──
     cd /tmp && rm -rf approval-repo-tmp
     git clone --depth 1 "https://github.com/$APPROVAL_REPO" approval-repo-tmp 2>/dev/null
     cd approval-repo-tmp
@@ -283,10 +312,10 @@ else
     git commit -m "open $RUN_ID" 2>/dev/null || true
     git push 2>/dev/null || true
     echo "GIT_PUSH=OK" > /tmp/git_push_status.txt
-  ) &
-  GH_PID=$!
-  # Also not waited on
-fi
+  fi
+) &
+GH_PID=$!
+# Not waited on — continues after open
 
 # ══════════════════════════════════════════════════════════
 # STEP 3: Open the lab (target: ≤4s)
