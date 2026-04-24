@@ -26,6 +26,7 @@ BORE_ENV="${HOME}/.bore_env"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG="/tmp/bore-tunnel.log"
 CF_LOG="/tmp/cloudflared-tunnel.log"
+PORT_HISTORY="${HOME}/.bore-port-history.log"
 
 # ── bore defaults (overridable via ~/.bore_env) ──────────────
 BORE_HOST="${BORE_HOST:-188.93.146.98}"
@@ -363,6 +364,8 @@ case "$CMD" in
       fi
       echo "[tunnel] Trying bore → ${BORE_HOST} ctrl=${TRY_PORT} ..."
       LIVE_PORT=$(_bore_try "$BORE_IP" "$TRY_PORT" "$SECRET_ARG" "$LOG") && USED_PORT="$TRY_PORT" && break || true
+      printf '%s  ctrl=%-4s  remote=%-5s  host=%s  result=FAIL\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "${TRY_PORT}" "-" "${BORE_HOST}" >> "${PORT_HISTORY}"
       echo "[tunnel] ctrl port ${TRY_PORT} failed — trying next"
     done
 
@@ -374,6 +377,10 @@ case "$CMD" in
         mv /tmp/_bore_env_tmp "$BORE_ENV"
         echo "[tunnel] Saved BORE_CTRL_PORT=${USED_PORT} → ${BORE_ENV}"
       fi
+      # Log winning port to history file
+      printf '%s  ctrl=%-4s  remote=%-5s  host=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "${USED_PORT}" "${LIVE_PORT}" "${BORE_HOST}" \
+        >> "${PORT_HISTORY}"
       echo "[tunnel] UP → ${BORE_HOST}:${LIVE_PORT} (ctrl=${USED_PORT})"
       echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
       push_port "$LIVE_PORT"
@@ -476,6 +483,10 @@ case "$CMD" in
     fi
 
     # ── 5. Last 5 bore log lines ─────────────────────────────
+    if [ -f "$PORT_HISTORY" ]; then
+      echo "[history]  last 10 entries in ~/.bore-port-history.log:"
+      tail -10 "$PORT_HISTORY" | sed 's/^/           /'
+    fi
     if [ -f "$LOG" ]; then
       echo "[log]      last 5 lines of $LOG:"
       tail -5 "$LOG" | sed 's/^/           /'
@@ -685,6 +696,8 @@ case "$CMD" in
         done
       fi
       if [ -n "${NEW_PORT:-}" ]; then
+        printf '%s  ctrl=%-4s  remote=%-5s  host=%s  result=OK(diagnose)\n' \
+          "$(date '+%Y-%m-%d %H:%M:%S')" "${BORE_CTRL_PORT:-?}" "${NEW_PORT}" "${BORE_HOST}" >> "${PORT_HISTORY}"
         echo "  ✓ Tunnel restarted → ${BORE_HOST}:${NEW_PORT}"
         echo "  → SSH: ssh -p ${NEW_PORT} $(whoami)@${BORE_HOST}"
         push_port "$NEW_PORT"
