@@ -1,5 +1,5 @@
-port=40030
+port=
 host=188.93.146.98
-ssh=ssh -p 40030 user@188.93.146.98
-updated=2026-04-24T17:11:21Z
-machine=e2b.local
+ssh=
+updated=2026-04-24T18:29:40Z
+machine=pending
