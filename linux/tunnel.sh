@@ -37,9 +37,20 @@ BORE_CTRL_PORT="${BORE_CTRL_PORT:-2222}"
 [ -f "$BORE_ENV" ] && set +eu && . "$BORE_ENV" && set -eu || true
 
 # ── bore binary resolution ───────────────────────────────────
+# Picks the right custom binary based on BORE_CTRL_PORT, then falls
+# back to generic bore installs.
 _bore_bin() {
+  # Prefer the custom binary matching the configured control port
+  case "${BORE_CTRL_PORT:-2222}" in
+    8443)
+      [ -x "${REPO_DIR}/bore-custom-8443" ] && echo "${REPO_DIR}/bore-custom-8443" && return 0
+      ;;
+    2222|*)
+      [ -x "${REPO_DIR}/bore-custom-2222" ] && echo "${REPO_DIR}/bore-custom-2222" && return 0
+      ;;
+  esac
+  # Generic fallbacks
   for P in \
-    "${REPO_DIR}/bore-custom-2222" \
     "${HOME}/.local/bin/bore" \
     "/usr/local/bin/bore" \
     "/usr/bin/bore"; do
