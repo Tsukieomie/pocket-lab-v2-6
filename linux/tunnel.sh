@@ -543,12 +543,61 @@ case "$CMD" in
 
   sync-port)
     git -C "$REPO_DIR" update-index --assume-unchanged bore-port.txt 2>/dev/null || true
+
+    # ── Check cloudflared first ───────────────────────────────
+    CF_HOST_LIVE=""
+    if systemctl --user is-active --quiet cloudflared-tunnel.service 2>/dev/null; then
+      CF_HOST_LIVE=$(journalctl --user -u cloudflared-tunnel.service -n 500 --no-pager 2>/dev/null \
+        | sed 's/\x1b\[[0-9;]*m//g' \
+        | grep -oE '[a-z0-9-]+\.trycloudflare\.com' | tail -1 || echo "")
+    fi
+    if [ -z "$CF_HOST_LIVE" ] && pgrep -f 'cloudflared.*tcp.*22' >/dev/null 2>&1; then
+      CF_HOST_LIVE=$(cat /tmp/cloudflared-tunnel.log 2>/dev/null \
+        | sed 's/\x1b\[[0-9;]*m//g' \
+        | grep -oE '[a-z0-9-]+\.trycloudflare\.com' | tail -1 || echo "")
+    fi
+    if [ -n "$CF_HOST_LIVE" ]; then
+      echo "[tunnel] Syncing cloudflared hostname ${CF_HOST_LIVE} → bore-port.txt + GitHub..."
+      TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+      cat > "$REPO_DIR/bore-port.txt" << PORTFILE
+port=cloudflared
+host=${CF_HOST_LIVE}
+ssh=ssh -o ProxyCommand="cloudflared access tcp --hostname https://${CF_HOST_LIVE}" user@localhost
+updated=${TIMESTAMP}
+machine=$(hostname)
+tunnel=cloudflared
+PORTFILE
+      echo "[tunnel] bore-port.txt updated → cloudflared host=${CF_HOST_LIVE}"
+      # Push to GitHub
+      REPO_CF="Tsukieomie/pocket-lab-v2-6"
+      FILE_CF="bore-port.txt"
+      ENCODED_CF=$(base64 -w0 < "$REPO_DIR/bore-port.txt" 2>/dev/null || base64 < "$REPO_DIR/bore-port.txt")
+      PUSH_OK_CF=false
+      if command -v gh >/dev/null 2>&1 && gh api user --jq '.login' >/dev/null 2>&1; then
+        SHA_CF=$(gh api "repos/${REPO_CF}/contents/${FILE_CF}" --jq '.sha' 2>/dev/null || echo "")
+        if [ -n "$SHA_CF" ]; then
+          gh api "repos/${REPO_CF}/contents/${FILE_CF}" -X PUT \
+            -f message="tunnel: cloudflared hostname ${CF_HOST_LIVE}" \
+            -f content="$ENCODED_CF" \
+            -f sha="$SHA_CF" \
+            --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK_CF=true || true
+        else
+          gh api "repos/${REPO_CF}/contents/${FILE_CF}" -X PUT \
+            -f message="tunnel: cloudflared hostname ${CF_HOST_LIVE}" \
+            -f content="$ENCODED_CF" \
+            --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK_CF=true || true
+        fi
+      fi
+      $PUSH_OK_CF && echo "[tunnel] GitHub bore-port.txt synced ✓ (cloudflared host=${CF_HOST_LIVE})" \
+        || echo "[tunnel] GitHub push skipped (non-fatal)"
+      exit 0
+    fi
+
+    # ── Fallback: bore port ───────────────────────────────────
     LIVE_PORT=""
-    # Try systemd journal first
     if _has_systemd_bore; then
       LIVE_PORT=$(_systemd_bore_port)
     fi
-    # Fallback: direct log
     if [ -z "$LIVE_PORT" ] && [ -f "$LOG" ]; then
       LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
         | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
@@ -557,7 +606,7 @@ case "$CMD" in
       echo "[tunnel] Syncing port ${LIVE_PORT} → bore-port.txt + GitHub..."
       push_port "$LIVE_PORT"
     else
-      echo "[tunnel] Could not determine live port (is bore running?)"
+      echo "[tunnel] Could not determine live port (is bore or cloudflared running?)"
       exit 1
     fi
     ;;
