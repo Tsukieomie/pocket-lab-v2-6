@@ -7,30 +7,29 @@ Wants=network-online.target
 [Service]
 Type=simple
 
-# Read config from ~/.bore_env (BORE_HOST, BORE_PORT, BORE_SECRET)
+# Read config from ~/.bore_env (BORE_HOST, BORE_SECRET override defaults)
 EnvironmentFile=-%h/.bore_env
 Environment=BORE_HOST=188.93.146.98
-Environment=BORE_PORT=
-Environment=BORE_SECRET=
+Environment=BORE_SECRET=pocketlab2026
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 ExecStart=/bin/sh -c '\
+  REPO="%h/pocket-lab-v2-6"; \
   BORE_BIN=""; \
-  for P in "%h/.local/bin/bore" "/usr/local/bin/bore" "/usr/bin/bore"; do \
+  for P in "$REPO/bore-custom-2222" "%h/.local/bin/bore" "/usr/local/bin/bore" "/usr/bin/bore"; do \
     [ -x "$P" ] && BORE_BIN="$P" && break; \
   done; \
   if [ -z "$BORE_BIN" ]; then \
-    echo "[bore-tunnel] bore not found — run: bash %h/pocket-lab-v2-6/linux/tunnel.sh install-bore"; \
+    echo "[bore-tunnel] bore not found — run: bash $REPO/linux/tunnel.sh install-bore"; \
     exit 1; \
   fi; \
-  PORT_ARG=""; [ -n "${BORE_PORT}" ] && PORT_ARG="--port ${BORE_PORT}"; \
   SECRET_ARG=""; [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"; \
   HOST_IP=$(getent ahostsv4 "${BORE_HOST}" 2>/dev/null | awk "/STREAM/{print \$1; exit}" \
     || python3 -c "import socket; print(socket.getaddrinfo(\"${BORE_HOST}\",None,socket.AF_INET)[0][4][0])" 2>/dev/null \
     || echo "${BORE_HOST}"); \
-  echo "[bore-tunnel] Resolved ${BORE_HOST} -> $HOST_IP (IPv4)"; \
-  echo "[bore-tunnel] Starting: $BORE_BIN local 22 --to $HOST_IP $PORT_ARG"; \
-  exec "$BORE_BIN" local 22 --to "$HOST_IP" $PORT_ARG $SECRET_ARG'
+  echo "[bore-tunnel] Using binary: $BORE_BIN"; \
+  echo "[bore-tunnel] Connecting to ${BORE_HOST} ($HOST_IP)"; \
+  exec "$BORE_BIN" local 22 --to "$HOST_IP" $SECRET_ARG'
 
 # Poll up to 15s for "listening at" line, then push bore-port.txt
 ExecStartPost=/bin/sh -c '\
@@ -59,11 +58,10 @@ ExecStopPost=/bin/sh -c '\
   sed -i "s/^updated=.*/updated=$(date -u +%Y-%m-%dT%H:%M:%SZ)/" "$PORT_FILE"; \
   echo "[bore-tunnel] bore-port.txt marked DOWN"'
 
-# Exponential backoff: 5s → up to 60s cap over 6 steps
-Restart=on-failure
+# Always restart — tunnel must stay up
+Restart=always
 RestartSec=5
-RestartSteps=6
-RestartMaxDelaySec=60
+RestartMaxDelaySec=30
 
 NoNewPrivileges=true
 PrivateTmp=true
