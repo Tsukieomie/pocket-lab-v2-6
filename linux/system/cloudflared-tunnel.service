@@ -43,7 +43,7 @@ ExecStart=/bin/sh -c '\
     exit 1; \
   fi; \
   echo "[cloudflared-tunnel] Using binary: $CF_BIN"; \
-  exec "$CF_BIN" tunnel --url tcp://localhost:22'
+  exec "$CF_BIN" tunnel --protocol http2 --url tcp://localhost:22'
 
 # After cloudflared reports a .trycloudflare.com hostname, push bore-port.txt
 # Note: initial sleep 3 lets cloudflared flush its logs before we query the journal
