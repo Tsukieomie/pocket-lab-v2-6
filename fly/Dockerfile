@@ -1,18 +1,13 @@
 FROM debian:12-slim
 
-# Install bore
-RUN apt-get update && apt-get install -y curl ca-certificates && \
-    curl -sL https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-unknown-linux-musl.tar.gz \
-    | tar xz -C /usr/local/bin/ && \
-    chmod +x /usr/local/bin/bore && \
-    apt-get remove -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+# Copy custom bore binary (control port patched to 2222)
+COPY bore-custom-2222 /usr/local/bin/bore
+RUN chmod +x /usr/local/bin/bore
 
-# Bore control port
-EXPOSE 7835
-# Tunnel port range
+# Control port 2222, tunnel port range 40000-40100
+EXPOSE 2222
 EXPOSE 40000-40100
 
-# BORE_SECRET must be set as a Fly secret
 ENV BORE_SECRET=""
 
 CMD ["sh", "-c", "bore server --secret \"$BORE_SECRET\" --min-port 40000 --max-port 40100"]

@@ -1,19 +1,18 @@
 # Pocket Lab — Bore Tunnel Server on Fly.io
+# Custom bore build: control port patched from 7835 → 2222
 app = "pocket-lab-bore"
-primary_region = "ord"  # Chicago — closest free-tier region for US East
+primary_region = "ord"
 
 [build]
-  image = "ekzhang/bore:latest"
-
-[processes]
-  app = "bore server --secret \"$BORE_SECRET\" --min-port 40000 --max-port 40100"
+  dockerfile = "Dockerfile"
+  build_context = ".."
 
 [[services]]
-  internal_port = 7835
+  internal_port = 2222
   protocol = "tcp"
 
   [[services.ports]]
-    port = 7835
+    port = 2222
 
 [[services]]
   internal_port = 40000
