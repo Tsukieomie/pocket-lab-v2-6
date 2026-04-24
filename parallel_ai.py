@@ -184,8 +184,10 @@ def _run_anthropic(prompt: str, model_id: str, system: str,
         }
         if system:
             payload["system"] = system
+        base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
+        url = base if base.endswith("/v1/messages") else base + "/v1/messages"
         req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
+            url,
             data=json.dumps(payload).encode(),
             headers={
                 "x-api-key": key,
