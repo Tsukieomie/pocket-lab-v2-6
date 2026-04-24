@@ -1,6 +1,0 @@
-port=cloudflared
-host=acquire-invited-labour-shield.trycloudflare.com
-ssh=ssh -o ProxyCommand="cloudflared access tcp --hostname https://acquire-invited-labour-shield.trycloudflare.com" user@localhost
-updated=2026-04-24T20:38:27Z
-machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
-tunnel=cloudflared
