@@ -40,21 +40,28 @@ BORE_CTRL_PORT="${BORE_CTRL_PORT:-2222}"
 # ── bore binary resolution ───────────────────────────────────
 # _bore_bin [PORT] — returns best binary for given ctrl port.
 # PORT defaults to BORE_CTRL_PORT, then 2222.
+#
+# The custom binaries (bore-custom-2222, bore-custom-8443) have their
+# control port baked in — they ignore any --control-port-style flag and
+# ALWAYS dial the port named in the binary. We must therefore only return
+# a custom binary when its baked-in port matches the requested port; any
+# other mapping would produce misleading logs (ctrl=X, actually dials Y).
 _bore_bin() {
   local PORT="${1:-${BORE_CTRL_PORT:-2222}}"
   case "$PORT" in
     8443)
       [ -x "${REPO_DIR}/bore-custom-8443" ] && echo "${REPO_DIR}/bore-custom-8443" && return 0
       ;;
-    443)
-      # 443 uses the same bore binary as 8443 if available, otherwise generic
-      [ -x "${REPO_DIR}/bore-custom-8443" ] && echo "${REPO_DIR}/bore-custom-8443" && return 0
-      ;;
-    2222|*)
+    2222)
       [ -x "${REPO_DIR}/bore-custom-2222" ] && echo "${REPO_DIR}/bore-custom-2222" && return 0
       ;;
+    *)
+      # Any other port (e.g. 443) requires the generic upstream `bore` binary
+      # that supports --to HOST plus --port <ctrl>. No custom binary aliasing.
+      :
+      ;;
   esac
-  # Generic fallbacks
+  # Generic fallbacks (upstream bore from install_bore / distro)
   for P in \
     "${HOME}/.local/bin/bore" \
     "/usr/local/bin/bore" \
@@ -347,11 +354,17 @@ case "$CMD" in
     SECRET_ARG=""
     [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"
 
-    # Try control ports in order: configured port first, then 2222 → 8443 → 443
-    # Build ordered list (configured port first, deduplicated)
+    # Try control ports in order: configured port first, then 2222 → 8443.
+    # Build ordered list (configured port first, deduplicated).
+    # NOTE: 443 is NOT in the automatic fallback list. The shipped custom
+    # bore binaries are hardcoded to 2222 and 8443; there is no 443-patched
+    # binary, and falling back to 443 would either re-dial 8443 (misleading
+    # logs) or require the upstream `bore` binary, which isn't guaranteed
+    # to be present. If you have upstream bore installed and want to try
+    # 443 as a ctrl port, set BORE_CTRL_PORT=443 in ~/.bore_env.
     CONFIGURED_PORT="${BORE_CTRL_PORT:-2222}"
     PORT_LIST="${CONFIGURED_PORT}"
-    for P in 2222 8443 443; do
+    for P in 2222 8443; do
       [ "$P" != "$CONFIGURED_PORT" ] && PORT_LIST="${PORT_LIST} ${P}"
     done
 
@@ -361,6 +374,13 @@ case "$CMD" in
       # Quick TCP probe before attempting bore (saves 10s timeout)
       if ! timeout 3 bash -c "echo >/dev/tcp/${BORE_IP}/${TRY_PORT}" 2>/dev/null; then
         echo "[tunnel] ctrl port ${TRY_PORT} unreachable — skipping"
+        continue
+      fi
+      # Skip if we don't have a binary that will actually dial this port.
+      # _bore_bin only returns a custom binary when its baked-in port
+      # matches, so this prevents the old 443→8443 silent aliasing bug.
+      if [ -z "$(_bore_bin "$TRY_PORT")" ]; then
+        echo "[tunnel] ctrl port ${TRY_PORT}: no matching bore binary — skipping"
         continue
       fi
       echo "[tunnel] Trying bore → ${BORE_HOST} ctrl=${TRY_PORT} ..."
@@ -387,7 +407,7 @@ case "$CMD" in
       push_port "$LIVE_PORT"
       fs_bridge_start
     else
-      echo "[tunnel] FAILED on all ports (2222, 8443, 443) — check $LOG"
+      echo "[tunnel] FAILED on all ports (${PORT_LIST}) — check $LOG"
       tail -20 "$LOG"
       exit 1
     fi
@@ -684,11 +704,17 @@ case "$CMD" in
         [ -n "${BORE_SECRET}" ] && D_SECRET_ARG="--secret ${BORE_SECRET}"
         D_CONFIGURED="${BORE_CTRL_PORT:-2222}"
         D_PORT_LIST="${D_CONFIGURED}"
-        for P in 2222 8443 443; do
+        # 443 intentionally excluded — see note above. Only try ports we
+        # actually have a matching bore binary for.
+        for P in 2222 8443; do
           [ "$P" != "$D_CONFIGURED" ] && D_PORT_LIST="${D_PORT_LIST} ${P}"
         done
         for TRY_PORT in $D_PORT_LIST; do
           timeout 3 bash -c "echo >/dev/tcp/${BORE_IP}/${TRY_PORT}" 2>/dev/null || continue
+          if [ -z "$(_bore_bin "$TRY_PORT")" ]; then
+            echo "  → ctrl=${TRY_PORT}: no matching bore binary — skipping"
+            continue
+          fi
           echo "  → Trying bore ctrl=${TRY_PORT} ..."
           NEW_PORT=$(_bore_try "$BORE_IP" "$TRY_PORT" "$D_SECRET_ARG" "$LOG") && \
             grep -v '^BORE_CTRL_PORT=' "$BORE_ENV" > /tmp/_bore_env_tmp 2>/dev/null || true && \

@@ -9,3 +9,7 @@ Terminal=false
 Categories=Network;Utility;
 StartupNotify=true
 StartupWMClass=electron
+# NOTE: install-computer-wrapper.sh rewrites Exec= to the installed path on
+# the current user's home at install time, so this template works for any
+# Linux user who runs the installer. The /home/kenny path above is the
+# fallback literal for reference installs on the Vivobook.

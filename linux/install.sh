@@ -64,6 +64,20 @@ chmod +x ~/Desktop/"Perplexity Connect.desktop"
 gio set ~/Desktop/"Perplexity Connect.desktop" metadata::trusted true 2>/dev/null || true
 
 echo ""
+echo ">> Installing Perplexity Computer / Comet Electron wrapper..."
+# Creates ~/perplexity-linux-wrapper (source files + local Electron install)
+# and installs the "Perplexity Comet" desktop launcher. Safe if node/npm
+# missing — the wrapper installer will print instructions and exit non-zero
+# without aborting the rest of install.sh (we tolerate failure here so that
+# tunnel/ssh setup still completes on machines without Node).
+if bash "$REPO_DIR/install-computer-wrapper.sh"; then
+  echo "   wrapper installed ✓"
+else
+  echo "   WARNING: wrapper install did not complete — install node/npm and run:"
+  echo "     bash $REPO_DIR/install-computer-wrapper.sh"
+fi
+
+echo ""
 echo ">> Setting up ~/.ssh/authorized_keys for Perplexity Computer tunnel access..."
 # NOTE: Always use ~/.ssh (not /root/.ssh) on a standard Linux account.
 mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
