@@ -1,5 +1,5 @@
-port=40000
-host=188.93.146.98
-ssh=ssh -p 40000 kenny@188.93.146.98
-updated=2026-04-24T15:19:00Z
-machine=pocket-lab-bore.fly.dev
+port=cloudflared
+host=being-foods-murray-feels.trycloudflare.com
+ssh=ssh -o ProxyCommand='cloudflared access tcp --hostname %h' kenny@being-foods-murray-feels.trycloudflare.com
+updated=2026-04-24T14:28:33Z
+machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA

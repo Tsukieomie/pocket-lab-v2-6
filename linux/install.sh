@@ -66,27 +66,78 @@ gio set ~/Desktop/"Perplexity Connect.desktop" metadata::trusted true 2>/dev/nul
 echo ""
 echo ">> Setting up ~/.ssh/authorized_keys for Perplexity Computer tunnel access..."
 # NOTE: Always use ~/.ssh (not /root/.ssh) on a standard Linux account.
-# /root/.ssh requires sudo and is not where sshd looks for your user.
 mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
 touch "${HOME}/.ssh/authorized_keys" && chmod 600 "${HOME}/.ssh/authorized_keys"
 
-# Canonical Perplexity Computer tunnel key — ONE entry, replaced not appended.
-# The key blob is the source of truth; the comment is normalised to
-# 'perplexity-computer-tunnel' so grep always finds it on re-runs.
-PERPLEXITY_KEY_BLOB="AAAAC3NzaC1lZDI1NTE5AAAAIFJfaR3o9eJlfwwZoneTL9rAdE7oY3U50uqsZ7eRM9JS"
-PERPLEXITY_PUBKEY="ssh-ed25519 ${PERPLEXITY_KEY_BLOB} perplexity-computer-tunnel"
-
-if grep -qF "${PERPLEXITY_KEY_BLOB}" "${HOME}/.ssh/authorized_keys" 2>/dev/null; then
-  echo "   Perplexity Computer pubkey already present — skipping"
+# Source of truth: linux/security/authorized_keys in the repo.
+# Each non-comment, non-empty line is merged idempotently into ~/.ssh/authorized_keys.
+AUTH_KEYS_SRC="${REPO_DIR}/security/authorized_keys"
+if [ -f "$AUTH_KEYS_SRC" ]; then
+  ADDED=0
+  while IFS= read -r LINE; do
+    # Skip blank lines and comments
+    [[ "$LINE" =~ ^[[:space:]]*$ ]] && continue
+    [[ "$LINE" =~ ^# ]]            && continue
+    # Extract the key blob (second field) for idempotent matching
+    KEY_BLOB=$(echo "$LINE" | awk '{print $2}')
+    if [ -z "$KEY_BLOB" ]; then continue; fi
+    if grep -qF "$KEY_BLOB" "${HOME}/.ssh/authorized_keys" 2>/dev/null; then
+      echo "   Already present: ...${KEY_BLOB: -16}"
+    else
+      echo "$LINE" >> "${HOME}/.ssh/authorized_keys"
+      echo "   Added: ...${KEY_BLOB: -16}"
+      ADDED=$((ADDED + 1))
+    fi
+  done < "$AUTH_KEYS_SRC"
+  echo "   $ADDED new key(s) added from linux/security/authorized_keys"
 else
-  echo "${PERPLEXITY_PUBKEY}" >> "${HOME}/.ssh/authorized_keys"
-  echo "   Added Perplexity Computer pubkey to ~/.ssh/authorized_keys"
+  echo "   WARNING: linux/security/authorized_keys not found — skipping key install"
+  echo "   (expected at: $AUTH_KEYS_SRC)"
 fi
 
 # Deduplicate on every install run so keys never accumulate.
-if [ -f "$REPO_DIR/linux/dedup-authorized-keys.sh" ]; then
-  bash "$REPO_DIR/linux/dedup-authorized-keys.sh"
+if [ -f "${REPO_DIR}/dedup-authorized-keys.sh" ]; then
+  bash "${REPO_DIR}/dedup-authorized-keys.sh"
 fi
+
+echo ""
+echo ">> Pre-scanning tunnel hosts into ~/.ssh/known_hosts ..."
+# Avoids interactive 'Are you sure you want to continue connecting?' prompts
+# when Perplexity Computer SSHes in through the tunnel for the first time.
+mkdir -p "${HOME}/.ssh" && chmod 700 "${HOME}/.ssh"
+touch "${HOME}/.ssh/known_hosts" && chmod 600 "${HOME}/.ssh/known_hosts"
+
+_keyscan_host() {
+  local HOST="$1"
+  local PORT="${2:-22}"
+  # Skip if all key types for this host are already present
+  if ssh-keygen -F "${HOST}" -f "${HOME}/.ssh/known_hosts" >/dev/null 2>&1; then
+    echo "   ${HOST}: already in known_hosts — skipping"
+    return 0
+  fi
+  echo "   Scanning ${HOST}:${PORT} ..."
+  local SCANNED
+  SCANNED=$(ssh-keyscan -T 8 -p "${PORT}" -H "${HOST}" 2>/dev/null)
+  if [ -n "$SCANNED" ]; then
+    echo "$SCANNED" >> "${HOME}/.ssh/known_hosts"
+    local COUNT
+    COUNT=$(echo "$SCANNED" | wc -l)
+    echo "   ${HOST}: added ${COUNT} key(s) ✓"
+  else
+    echo "   ${HOST}: keyscan failed (host unreachable or port blocked) — skipping"
+    echo "   (SSH will prompt on first connect; run install.sh again when connected)"
+  fi
+}
+
+# Hosts to pre-scan:
+# - bore.pub        : legacy bore tunnel server (port 7835 for control, SSH over random port)
+# - serveo.net      : fallback SSH relay (port 80/443)
+# cloudflared tunnels use HTTPS termination — no SSH host key to scan for those.
+for HOST in bore.pub serveo.net; do
+  _keyscan_host "$HOST" 22
+done
+
+echo "   known_hosts pre-scan complete."
 
 echo ">> Configuring ~/.bore_env ..."
 

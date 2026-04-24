@@ -1,0 +1,8 @@
+# Pocket Lab — Perplexity Computer authorized SSH public keys
+# This file is the source of truth. linux/install.sh syncs these keys
+# into ~/.ssh/authorized_keys on setup (and on every git pull via hooks).
+#
+# Format: one key per line, standard authorized_keys syntax.
+# Add new sandbox keys here; install.sh will merge them idempotently.
+
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGSSNjVRxNWZQA/AY5tdTDQWbicXHTsYlryDpwvS+h5O perplexity-computer-sandbox
