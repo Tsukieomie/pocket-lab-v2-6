@@ -1,24 +1,22 @@
 [Unit]
-Description=Pocket Lab — cloudflared SSH tunnel (quick tunnel + auto-publish)
+Description=Pocket Lab — cloudflared SSH tunnel (tcp quick tunnel + auto-publish)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 Environment=PATH=/home/kenny/.local/bin:/usr/local/bin:/usr/bin:/bin
-Environment=TUNNEL_LOG=/tmp/cloudflared-quick.log
 
-# Start cloudflared quick tunnel (ssh://) with http2 to bypass QUIC block
+# TCP tunnel — raw TCP proxy, client uses 'cloudflared access tcp'
 ExecStart=/home/kenny/.local/bin/cloudflared tunnel \
   --no-autoupdate \
   --protocol http2 \
   --edge-ip-version 4 \
-  --url ssh://localhost:22
+  --url tcp://localhost:22
 
 # Wait for hostname then push to GitHub via gh CLI
 ExecStartPost=/bin/bash -c '\
-  REPO_DIR="${HOME}/pocket-lab-v2-6"; \
-  sleep 3; \
+  sleep 4; \
   HOSTNAME=""; \
   for i in $(seq 1 40); do \
     HOSTNAME=$(journalctl --user -u cloudflared-tunnel.service -n 500 --no-pager 2>/dev/null \
@@ -31,30 +29,28 @@ ExecStartPost=/bin/bash -c '\
   echo "[cf-post] hostname: $HOSTNAME"; \
   TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ); \
   USER=$(whoami); \
-  CONTENT="host=${HOSTNAME}\nssh=ssh -o ProxyCommand=\"cloudflared access ssh --hostname https://${HOSTNAME}\" ${USER}@localhost\nupdated=${TIMESTAMP}\nmachine=$(hostname)"; \
-  printf "$CONTENT\n" > "${REPO_DIR}/bore-port.txt"; \
-  ENCODED=$(base64 -w 0 < "${REPO_DIR}/bore-port.txt" 2>/dev/null || base64 < "${REPO_DIR}/bore-port.txt"); \
+  CONTENT="host=${HOSTNAME}\nssh=ssh -o ProxyCommand=\"cloudflared access tcp --hostname https://${HOSTNAME}\" ${USER}@localhost\nupdated=${TIMESTAMP}\nmachine=$(hostname)"; \
+  printf "$CONTENT\n" > "${HOME}/pocket-lab-v2-6/bore-port.txt"; \
+  ENCODED=$(base64 -w 0 < "${HOME}/pocket-lab-v2-6/bore-port.txt" 2>/dev/null || base64 < "${HOME}/pocket-lab-v2-6/bore-port.txt"); \
   SHA=$(gh api repos/Tsukieomie/pocket-lab-v2-6/contents/bore-port.txt --jq ".sha" 2>/dev/null || echo ""); \
   if [ -n "$SHA" ]; then \
     gh api repos/Tsukieomie/pocket-lab-v2-6/contents/bore-port.txt -X PUT \
-      -f message="tunnel up: ${HOSTNAME} @ ${TIMESTAMP}" \
+      -f message="tunnel up (tcp): ${HOSTNAME} @ ${TIMESTAMP}" \
       -f content="${ENCODED}" -f sha="${SHA}" --jq ".commit.sha" 2>/dev/null \
       && echo "[cf-post] pushed to GitHub OK" || echo "[cf-post] gh push failed"; \
   else \
     gh api repos/Tsukieomie/pocket-lab-v2-6/contents/bore-port.txt -X PUT \
-      -f message="tunnel up: ${HOSTNAME} @ ${TIMESTAMP}" \
+      -f message="tunnel up (tcp): ${HOSTNAME} @ ${TIMESTAMP}" \
       -f content="${ENCODED}" --jq ".commit.sha" 2>/dev/null \
       && echo "[cf-post] pushed to GitHub OK (new)" || echo "[cf-post] gh push failed (new)"; \
   fi'
 
 ExecStopPost=/bin/bash -c '\
-  REPO_DIR="${HOME}/pocket-lab-v2-6"; \
   TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ); \
-  printf "host=DOWN\nupdated=${TIMESTAMP}\n" > "${REPO_DIR}/bore-port.txt"; \
-  ENCODED=$(base64 -w 0 < "${REPO_DIR}/bore-port.txt" 2>/dev/null || base64 < "${REPO_DIR}/bore-port.txt"); \
   SHA=$(gh api repos/Tsukieomie/pocket-lab-v2-6/contents/bore-port.txt --jq ".sha" 2>/dev/null || echo ""); \
+  CONTENT=$(printf "host=DOWN\nupdated=%s\n" "$TIMESTAMP" | base64 -w 0 2>/dev/null || printf "host=DOWN\nupdated=%s\n" "$TIMESTAMP" | base64); \
   [ -n "$SHA" ] && gh api repos/Tsukieomie/pocket-lab-v2-6/contents/bore-port.txt -X PUT \
-    -f message="tunnel down @ ${TIMESTAMP}" -f content="${ENCODED}" -f sha="${SHA}" \
+    -f message="tunnel down @ ${TIMESTAMP}" -f content="${CONTENT}" -f sha="${SHA}" \
     --jq ".commit.sha" 2>/dev/null || true'
 
 Restart=always
