@@ -314,27 +314,18 @@ case "$CMD" in
     ;;
 
   sync-port)
-    if _has_systemd_tunnel && systemctl --user is-active --quiet cloudflared-tunnel.service 2>/dev/null; then
-      LIVE_HOST=$(_systemd_tunnel_url)
-      if [ -n "$LIVE_HOST" ]; then
-        echo "[tunnel] Syncing host ${LIVE_HOST} → bore-port.txt + GitHub..."
-        push_port "$LIVE_HOST"
-      else
-        echo "[tunnel] Could not read live hostname from systemd journal"
-        exit 1
-      fi
-    elif pgrep -f "cloudflared.*tcp.*22" >/dev/null 2>&1; then
+    # Try journal first (works whether called manually or from ExecStartPost)
+    LIVE_HOST=$(_systemd_tunnel_url)
+    # Fallback: scan the direct-launch log file
+    if [ -z "$LIVE_HOST" ] && [ -f "$LOG" ]; then
       LIVE_HOST=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
         | grep -oE '[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
-      if [ -n "$LIVE_HOST" ]; then
-        echo "[tunnel] Syncing host ${LIVE_HOST} → bore-port.txt + GitHub..."
-        push_port "$LIVE_HOST"
-      else
-        echo "[tunnel] cloudflared is running but hostname not found in log"
-        exit 1
-      fi
+    fi
+    if [ -n "$LIVE_HOST" ]; then
+      echo "[tunnel] Syncing host ${LIVE_HOST} → bore-port.txt + GitHub..."
+      push_port "$LIVE_HOST"
     else
-      echo "[tunnel] Tunnel is not running"
+      echo "[tunnel] Could not determine live hostname (is cloudflared running?)"
       exit 1
     fi
     ;;
