@@ -1,5 +1,6 @@
 # Pocket Lab — Bore Tunnel Server on Fly.io
-# Custom bore build: control port patched from 7835 → 2222
+# bore-custom-2222 binary listens on port 443 as control port
+# We map external 40000 → internal 443 to bypass Fly's 443 TLS interception
 app = "pocket-lab-bore"
 primary_region = "ord"
 
@@ -7,47 +8,43 @@ primary_region = "ord"
   dockerfile = "Dockerfile"
   build_context = ".."
 
+# Control port: external 40000 → internal 443 (bore-custom-2222 listens on 443)
 [[services]]
-  internal_port = 2222
+  internal_port = 443
   protocol = "tcp"
-
-  [[services.ports]]
-    port = 2222
-
-[[services]]
-  internal_port = 40000
-  protocol = "tcp"
-
   [[services.ports]]
     port = 40000
 
+# Tunnel ports 40001-40005
 [[services]]
   internal_port = 40001
   protocol = "tcp"
-
   [[services.ports]]
     port = 40001
 
 [[services]]
   internal_port = 40002
   protocol = "tcp"
-
   [[services.ports]]
     port = 40002
 
 [[services]]
   internal_port = 40003
   protocol = "tcp"
-
   [[services.ports]]
     port = 40003
 
 [[services]]
   internal_port = 40004
   protocol = "tcp"
-
   [[services.ports]]
     port = 40004
+
+[[services]]
+  internal_port = 40005
+  protocol = "tcp"
+  [[services.ports]]
+    port = 40005
 
 [vm]
   memory = "256mb"
