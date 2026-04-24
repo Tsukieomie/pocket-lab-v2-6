@@ -1,10 +1,13 @@
 #!/bin/bash
 # ============================================================
-# linux/tunnel.sh — Pocket Lab cloudflared SSH tunnel (v2.9)
+# linux/tunnel.sh — Pocket Lab SSH tunnel (v3.0)
 #
-# Uses Cloudflare Tunnel (cloudflared) as the backend.
-# Tunnels over HTTPS/443 — bypasses ISP port blocks.
-# No account needed — quick-tunnel mode is free & zero-config.
+# Primary backend: bore TCP → 188.93.146.98:2222
+# Fallback: cloudflared quick-tunnel (HTTP only, no SSH proxy)
+#
+# bore tunnels pure TCP — works with standard SSH, no proxy
+# command needed. SSH connect command:
+#   ssh -p <port> kenny@188.93.146.98
 #
 # Works as a normal user (no root/sudo required).
 #
@@ -13,17 +16,39 @@
 #   bash ~/pocket-lab-v2-6/linux/tunnel.sh down
 #   bash ~/pocket-lab-v2-6/linux/tunnel.sh status
 #   bash ~/pocket-lab-v2-6/linux/tunnel.sh sync-port
-#   bash ~/pocket-lab-v2-6/linux/tunnel.sh install-cloudflared
-#   bash ~/pocket-lab-v2-6/linux/tunnel.sh install-bore   (legacy, kept for compat)
+#   bash ~/pocket-lab-v2-6/linux/tunnel.sh install-bore
+#   bash ~/pocket-lab-v2-6/linux/tunnel.sh install-cloudflared  (legacy)
 #   bash ~/pocket-lab-v2-6/linux/tunnel.sh fs-bridge [start|stop|status]
 # ============================================================
 set -eu
 
 BORE_ENV="${HOME}/.bore_env"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG="/tmp/cloudflared-tunnel.log"
+LOG="/tmp/bore-tunnel.log"
+CF_LOG="/tmp/cloudflared-tunnel.log"
 
-# ── cloudflared binary resolution ───────────────────────────
+# ── bore defaults (overridable via ~/.bore_env) ──────────────
+BORE_HOST="${BORE_HOST:-188.93.146.98}"
+BORE_SECRET="${BORE_SECRET:-pocketlab2026}"
+BORE_CTRL_PORT="${BORE_CTRL_PORT:-2222}"
+
+# Source ~/.bore_env for overrides (ignore missing)
+# shellcheck disable=SC1090
+[ -f "$BORE_ENV" ] && set +eu && . "$BORE_ENV" && set -eu || true
+
+# ── bore binary resolution ───────────────────────────────────
+_bore_bin() {
+  for P in \
+    "${REPO_DIR}/bore-custom-2222" \
+    "${HOME}/.local/bin/bore" \
+    "/usr/local/bin/bore" \
+    "/usr/bin/bore"; do
+    [ -x "$P" ] && echo "$P" && return 0
+  done
+  command -v bore 2>/dev/null || echo ""
+}
+
+# ── cloudflared binary resolution (legacy fallback) ─────────
 _cf_bin() {
   for P in \
     "${HOME}/.local/bin/cloudflared" \
@@ -35,46 +60,41 @@ _cf_bin() {
 }
 
 # ── ~/.bore_env helpers ──────────────────────────────────────
-_gh_token()  { grep '^GH_TOKEN='  "$BORE_ENV" 2>/dev/null | cut -d= -f2 || true; }
+_gh_token() { grep '^GH_TOKEN=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || true; }
 
-# ── Systemd user service integration ────────────────────────
-_has_systemd_tunnel() {
+# ── Systemd user service helpers ────────────────────────────
+_has_systemd_bore() {
+  systemctl --user list-unit-files bore-tunnel.service 2>/dev/null \
+    | grep -q '^bore-tunnel\.service'
+}
+
+_has_systemd_cf() {
   systemctl --user list-unit-files cloudflared-tunnel.service 2>/dev/null \
     | grep -q '^cloudflared-tunnel\.service'
 }
 
-# Extract SSH URL from cloudflared-tunnel.service journal.
-# cloudflared quick-tunnel prints: "Your quick Tunnel has been created! Visit it at (it may take some time to be reachable): https://XXXXX.trycloudflare.com"
-# For TCP tunnels it prints: "INF | Registered tunnel connection"
-# We capture the trycloudflare.com hostname from the log.
-# IMPORTANT: uses --since based on the service's last ExecMainStartTimestamp so we
-# never read stale hostnames from previous service invocations.
-_systemd_tunnel_url() {
-  # Get the timestamp of the current/last service start so we only read fresh logs
+# Extract bore port from journal — scoped to current service invocation
+_systemd_bore_port() {
   local SINCE
-  SINCE=$(systemctl --user show cloudflared-tunnel.service \
+  SINCE=$(systemctl --user show bore-tunnel.service \
     --property=ExecMainStartTimestamp 2>/dev/null \
     | sed 's/ExecMainStartTimestamp=//' | grep -v '^$' || echo "")
   if [ -n "$SINCE" ] && [ "$SINCE" != "n/a" ]; then
-    journalctl --user -u cloudflared-tunnel.service --since="$SINCE" --no-pager 2>/dev/null \
+    journalctl --user -u bore-tunnel.service --since="$SINCE" --no-pager 2>/dev/null \
       | sed 's/\x1b\[[0-9;]*m//g' \
-      | grep -oE '[a-z0-9-]+\.trycloudflare\.com' \
-      | tail -1 || true
+      | grep "listening at" | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true
   else
-    # Fallback: limit to last 300 lines (less reliable but safe)
-    journalctl --user -u cloudflared-tunnel.service -n 300 --no-pager 2>/dev/null \
+    journalctl --user -u bore-tunnel.service -n 200 --no-pager 2>/dev/null \
       | sed 's/\x1b\[[0-9;]*m//g' \
-      | grep -oE '[a-z0-9-]+\.trycloudflare\.com' \
-      | tail -1 || true
+      | grep "listening at" | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true
   fi
 }
 
 # ── push_port: write bore-port.txt and push to GitHub ───────
-# For cloudflared we record the hostname (not a numeric port).
-# The SSH connect command is:
-#   ssh -o ProxyCommand='cloudflared access tcp --hostname %h' kenny@<hostname>
+# Records bore host + port so Computer can SSH in directly:
+#   ssh -p <port> kenny@188.93.146.98
 push_port() {
-  local HOSTNAME_VAL="$1"
+  local PORT_VAL="$1"
   local TIMESTAMP
   TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
   local USERNAME
@@ -82,15 +102,14 @@ push_port() {
 
   # ── 1. Write local bore-port.txt ──
   cat > "$REPO_DIR/bore-port.txt" << PORTFILE
-port=cloudflared
-host=${HOSTNAME_VAL}
-ssh=ssh -o ProxyCommand='cloudflared access tcp --hostname %h' ${USERNAME}@${HOSTNAME_VAL}
+port=${PORT_VAL}
+host=${BORE_HOST}
+ssh=ssh -p ${PORT_VAL} ${USERNAME}@${BORE_HOST}
 updated=${TIMESTAMP}
 machine=$(hostname)
 PORTFILE
-  echo "[tunnel] bore-port.txt updated → host=${HOSTNAME_VAL}"
+  echo "[tunnel] bore-port.txt updated → port=${PORT_VAL} host=${BORE_HOST}"
   # Prevent 'git pull' conflicts — bore-port.txt is runtime state, not source.
-  # GitHub API is the source of truth; local copy is ephemeral.
   git -C "$REPO_DIR" update-index --assume-unchanged bore-port.txt 2>/dev/null || true
 
   # ── 2. Resolve GitHub token ──
@@ -118,9 +137,9 @@ PORTFILE
 
   local PAYLOAD
   if [ -n "$SHA" ]; then
-    PAYLOAD="{\"message\":\"tunnel up: ${HOSTNAME_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\",\"sha\":\"${SHA}\"}"
+    PAYLOAD="{\"message\":\"tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\",\"sha\":\"${SHA}\"}"
   else
-    PAYLOAD="{\"message\":\"tunnel up: ${HOSTNAME_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\"}"
+    PAYLOAD="{\"message\":\"tunnel up: port=${PORT_VAL} @ ${TIMESTAMP}\",\"content\":\"${ENCODED}\"}"
   fi
 
   local PUSH_OK=false
@@ -132,40 +151,15 @@ PORTFILE
     && PUSH_OK=true \
     || echo "[tunnel] GitHub push failed (non-fatal) — local bore-port.txt is current"
 
-  $PUSH_OK && echo "[tunnel] GitHub bore-port.txt synced ✓ (host=${HOSTNAME_VAL})" || true
+  $PUSH_OK && echo "[tunnel] GitHub bore-port.txt synced ✓ (port=${PORT_VAL} host=${BORE_HOST})" || true
 }
 
 # Keep old alias
 push_port_to_github() { push_port "$1"; }
 
-# ── install-cloudflared ──────────────────────────────────────
-install_cloudflared() {
-  echo "[tunnel] Installing cloudflared to ~/.local/bin/ ..."
-  mkdir -p "${HOME}/.local/bin"
-  ARCH=$(uname -m)
-  case "$ARCH" in
-    x86_64)  CF_ARCH="amd64"   ;;
-    aarch64) CF_ARCH="arm64"   ;;
-    armv7l)  CF_ARCH="arm"     ;;
-    *)
-      echo "[tunnel] ERROR: Unknown arch $ARCH"
-      echo "[tunnel] Download manually: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
-      exit 1
-      ;;
-  esac
-  URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}"
-  echo "[tunnel] Downloading $URL ..."
-  curl -fsSL "$URL" -o "${HOME}/.local/bin/cloudflared"
-  chmod +x "${HOME}/.local/bin/cloudflared"
-  echo "[tunnel] cloudflared installed: ${HOME}/.local/bin/cloudflared"
-  "${HOME}/.local/bin/cloudflared" --version
-  echo "[tunnel] Make sure ~/.local/bin is in your PATH:"
-  echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
-}
-
-# ── install-bore (legacy) ────────────────────────────────────
+# ── install-bore ─────────────────────────────────────────────
 install_bore() {
-  echo "[tunnel] Installing bore binary to ~/.local/bin/ (legacy) ..."
+  echo "[tunnel] Installing bore binary to ~/.local/bin/ ..."
   mkdir -p "${HOME}/.local/bin"
   ARCH=$(uname -m)
   case "$ARCH" in
@@ -176,11 +170,35 @@ install_bore() {
   esac
   BORE_VER="0.6.0"
   URL="https://github.com/ekzhang/bore/releases/download/v${BORE_VER}/bore-v${BORE_VER}-${BORE_TARGET}.tar.gz"
+  echo "[tunnel] Downloading $URL ..."
   curl -fsSL "$URL" -o /tmp/bore-linux.tar.gz
   tar -xzf /tmp/bore-linux.tar.gz -C /tmp
   chmod +x /tmp/bore
   mv /tmp/bore "${HOME}/.local/bin/bore"
   echo "[tunnel] bore installed: ${HOME}/.local/bin/bore"
+  "${HOME}/.local/bin/bore" --version 2>/dev/null || true
+}
+
+# ── install-cloudflared (legacy) ─────────────────────────────
+install_cloudflared() {
+  echo "[tunnel] Installing cloudflared to ~/.local/bin/ ..."
+  mkdir -p "${HOME}/.local/bin"
+  ARCH=$(uname -m)
+  case "$ARCH" in
+    x86_64)  CF_ARCH="amd64"   ;;
+    aarch64) CF_ARCH="arm64"   ;;
+    armv7l)  CF_ARCH="arm"     ;;
+    *)
+      echo "[tunnel] ERROR: Unknown arch $ARCH"
+      exit 1
+      ;;
+  esac
+  URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}"
+  echo "[tunnel] Downloading $URL ..."
+  curl -fsSL "$URL" -o "${HOME}/.local/bin/cloudflared"
+  chmod +x "${HOME}/.local/bin/cloudflared"
+  echo "[tunnel] cloudflared installed: ${HOME}/.local/bin/cloudflared"
+  "${HOME}/.local/bin/cloudflared" --version
 }
 
 # ── fs-bridge helpers ────────────────────────────────────────
@@ -231,65 +249,72 @@ fs_bridge_status() {
 CMD="${1:-status}"
 
 case "$CMD" in
-  install-cloudflared)
-    install_cloudflared
-    ;;
-
   install-bore)
     install_bore
     ;;
 
+  install-cloudflared)
+    install_cloudflared
+    ;;
+
   up)
-    # Prefer systemd if service is installed
-    if _has_systemd_tunnel; then
-      systemctl --user start cloudflared-tunnel.service 2>&1 || true
-      # Poll up to 20s for cloudflared to print the trycloudflare.com hostname
-      LIVE_HOST=""
+    # ── Prefer bore-tunnel systemd service ──
+    if _has_systemd_bore; then
+      systemctl --user start bore-tunnel.service 2>&1 || true
+      LIVE_PORT=""
       for i in $(seq 1 20); do
-        LIVE_HOST=$(_systemd_tunnel_url)
-        [ -n "$LIVE_HOST" ] && break
+        LIVE_PORT=$(_systemd_bore_port)
+        [ -n "$LIVE_PORT" ] && break
         sleep 1
       done
-      if [ -n "$LIVE_HOST" ]; then
-        echo "[tunnel] UP (systemd) → ${LIVE_HOST}"
-        echo "[tunnel] SSH: ssh -o ProxyCommand='cloudflared access tcp --hostname %h' $(whoami)@${LIVE_HOST}"
-        push_port "$LIVE_HOST"
+      if [ -n "$LIVE_PORT" ]; then
+        echo "[tunnel] UP (systemd/bore) → ${BORE_HOST}:${LIVE_PORT}"
+        echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
+        push_port "$LIVE_PORT"
         exit 0
       else
-        echo "[tunnel] cloudflared-tunnel.service did not report a hostname within 20s; falling back"
+        echo "[tunnel] bore-tunnel.service did not report a port within 20s; falling back to direct"
       fi
     fi
 
-    # Direct invocation
-    CF_BIN=$(_cf_bin)
-    if [ -z "$CF_BIN" ]; then
-      echo "[tunnel] cloudflared not found — installing..."
-      install_cloudflared
-      CF_BIN="${HOME}/.local/bin/cloudflared"
+    # ── Direct bore invocation ──
+    BORE_BIN=$(_bore_bin)
+    if [ -z "$BORE_BIN" ]; then
+      echo "[tunnel] bore not found — installing..."
+      install_bore
+      BORE_BIN="${HOME}/.local/bin/bore"
     fi
 
-    if pgrep -f "cloudflared.*tcp.*22" >/dev/null 2>&1; then
+    if pgrep -f "bore local 22" >/dev/null 2>&1; then
       echo "[tunnel] Already running."
       exit 0
     fi
 
-    echo "[tunnel] Starting cloudflared TCP tunnel for SSH (port 22)..."
-    : > "$LOG"
-    "$CF_BIN" tunnel --url tcp://localhost:22 >> "$LOG" 2>&1 &
+    # Resolve IP (bore needs IP, not hostname, on some builds)
+    BORE_IP=$(getent ahostsv4 "${BORE_HOST}" 2>/dev/null | awk '/STREAM/{print $1; exit}' \
+      || python3 -c "import socket; print(socket.getaddrinfo('${BORE_HOST}',None,socket.AF_INET)[0][4][0])" 2>/dev/null \
+      || echo "${BORE_HOST}")
 
-    # Poll up to 30s for trycloudflare.com hostname
-    LIVE_HOST=""
+    echo "[tunnel] Starting bore tunnel → ${BORE_HOST} (${BORE_IP}) ctrl=${BORE_CTRL_PORT} ..."
+    : > "$LOG"
+    SECRET_ARG=""
+    [ -n "${BORE_SECRET}" ] && SECRET_ARG="--secret ${BORE_SECRET}"
+    # shellcheck disable=SC2086
+    "$BORE_BIN" local 22 --to "$BORE_IP" --port-forward "$BORE_CTRL_PORT" $SECRET_ARG >> "$LOG" 2>&1 &
+
+    # Poll up to 30s for "listening at :<port>"
+    LIVE_PORT=""
     for i in $(seq 1 30); do
       sleep 1
-      LIVE_HOST=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
-        | grep -oE '[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
-      [ -n "$LIVE_HOST" ] && break
+      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
+        | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
+      [ -n "$LIVE_PORT" ] && break
     done
 
-    if pgrep -f "cloudflared.*tcp.*22" >/dev/null 2>&1 && [ -n "$LIVE_HOST" ]; then
-      echo "[tunnel] UP → ${LIVE_HOST}"
-      echo "[tunnel] SSH: ssh -o ProxyCommand='cloudflared access tcp --hostname %h' $(whoami)@${LIVE_HOST}"
-      push_port "$LIVE_HOST"
+    if pgrep -f "bore local 22" >/dev/null 2>&1 && [ -n "$LIVE_PORT" ]; then
+      echo "[tunnel] UP → ${BORE_HOST}:${LIVE_PORT}"
+      echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
+      push_port "$LIVE_PORT"
     else
       echo "[tunnel] FAILED — check $LOG"
       tail -30 "$LOG"
@@ -298,54 +323,64 @@ case "$CMD" in
     ;;
 
   down)
-    if _has_systemd_tunnel && systemctl --user is-active --quiet cloudflared-tunnel.service 2>/dev/null; then
-      systemctl --user stop cloudflared-tunnel.service && echo "[tunnel] Stopped (systemd)." && exit 0
+    # Stop bore systemd service if running
+    if _has_systemd_bore && systemctl --user is-active --quiet bore-tunnel.service 2>/dev/null; then
+      systemctl --user stop bore-tunnel.service && echo "[tunnel] Stopped (systemd/bore)." && exit 0
     fi
-    pkill -f "cloudflared.*tcp.*22" 2>/dev/null \
-      && echo "[tunnel] Stopped." \
+    # Stop cloudflared systemd service if running
+    if _has_systemd_cf && systemctl --user is-active --quiet cloudflared-tunnel.service 2>/dev/null; then
+      systemctl --user stop cloudflared-tunnel.service && echo "[tunnel] Stopped (systemd/cloudflared)." && exit 0
+    fi
+    # Kill direct bore process
+    pkill -f "bore local 22" 2>/dev/null \
+      && echo "[tunnel] Stopped (bore)." \
       || echo "[tunnel] Not running."
     ;;
 
   status)
-    if _has_systemd_tunnel && systemctl --user is-active --quiet cloudflared-tunnel.service 2>/dev/null; then
-      LIVE_HOST=$(_systemd_tunnel_url)
-      [ -z "$LIVE_HOST" ] && LIVE_HOST="(hostname pending)"
-      echo "[tunnel] RUNNING (systemd) → ${LIVE_HOST}"
-      echo "[tunnel] SSH: ssh -o ProxyCommand='cloudflared access tcp --hostname %h' $(whoami)@${LIVE_HOST}"
-      LOCAL_HOST=$(grep '^host=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "unknown")
-      if [ "$LOCAL_HOST" != "$LIVE_HOST" ]; then
-        echo "[tunnel] WARNING: bore-port.txt has host=${LOCAL_HOST} but live host is ${LIVE_HOST}"
+    # bore systemd
+    if _has_systemd_bore && systemctl --user is-active --quiet bore-tunnel.service 2>/dev/null; then
+      LIVE_PORT=$(_systemd_bore_port)
+      [ -z "$LIVE_PORT" ] && LIVE_PORT="(port pending)"
+      echo "[tunnel] RUNNING (systemd/bore) → ${BORE_HOST}:${LIVE_PORT}"
+      echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
+      LOCAL_PORT=$(grep '^port=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "unknown")
+      if [ "$LOCAL_PORT" != "$LIVE_PORT" ]; then
+        echo "[tunnel] WARNING: bore-port.txt has port=${LOCAL_PORT} but live port is ${LIVE_PORT}"
         echo "[tunnel] Run: bash $0 sync-port"
       else
         echo "[tunnel] bore-port.txt in sync ✓"
       fi
       exit 0
     fi
-    if pgrep -f "cloudflared.*tcp.*22" >/dev/null 2>&1; then
-      LIVE_HOST=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
-        | grep -oE '[a-z0-9-]+\.trycloudflare\.com' | tail -1 || echo "?")
-      echo "[tunnel] RUNNING → ${LIVE_HOST}"
-      echo "[tunnel] SSH: ssh -o ProxyCommand='cloudflared access tcp --hostname %h' $(whoami)@${LIVE_HOST}"
+    # direct bore process
+    if pgrep -f "bore local 22" >/dev/null 2>&1; then
+      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
+        | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || echo "?")
+      echo "[tunnel] RUNNING (bore) → ${BORE_HOST}:${LIVE_PORT}"
+      echo "[tunnel] SSH: ssh -p ${LIVE_PORT} $(whoami)@${BORE_HOST}"
     else
       echo "[tunnel] DOWN"
     fi
     ;;
 
   sync-port)
-    # Silence git-pull conflicts on bore-port.txt for future pulls
     git -C "$REPO_DIR" update-index --assume-unchanged bore-port.txt 2>/dev/null || true
-    # Try journal first (works whether called manually or from ExecStartPost)
-    LIVE_HOST=$(_systemd_tunnel_url)
-    # Fallback: scan the direct-launch log file
-    if [ -z "$LIVE_HOST" ] && [ -f "$LOG" ]; then
-      LIVE_HOST=$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" \
-        | grep -oE '[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
+    LIVE_PORT=""
+    # Try systemd journal first
+    if _has_systemd_bore; then
+      LIVE_PORT=$(_systemd_bore_port)
     fi
-    if [ -n "$LIVE_HOST" ]; then
-      echo "[tunnel] Syncing host ${LIVE_HOST} → bore-port.txt + GitHub..."
-      push_port "$LIVE_HOST"
+    # Fallback: direct log
+    if [ -z "$LIVE_PORT" ] && [ -f "$LOG" ]; then
+      LIVE_PORT=$(grep "listening at" "$LOG" 2>/dev/null \
+        | grep -oE ':[0-9]+' | tail -1 | tr -d ':' || true)
+    fi
+    if [ -n "$LIVE_PORT" ]; then
+      echo "[tunnel] Syncing port ${LIVE_PORT} → bore-port.txt + GitHub..."
+      push_port "$LIVE_PORT"
     else
-      echo "[tunnel] Could not determine live hostname (is cloudflared running?)"
+      echo "[tunnel] Could not determine live port (is bore running?)"
       exit 1
     fi
     ;;
@@ -365,7 +400,7 @@ case "$CMD" in
     ;;
 
   *)
-    echo "Usage: $0 [up|down|status|sync-port|install-cloudflared|install-bore|fs-bridge]"
+    echo "Usage: $0 [up|down|status|sync-port|install-bore|install-cloudflared|fs-bridge]"
     exit 1
     ;;
 esac
