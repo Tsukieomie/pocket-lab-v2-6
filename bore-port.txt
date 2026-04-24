@@ -1,5 +1,5 @@
-port=40047
+port=40023
 host=188.93.146.98
-ssh=ssh -p 40047 user@188.93.146.98
-updated=2026-04-24T20:19:54Z
+ssh=ssh -p 40023 user@188.93.146.98
+updated=2026-04-24T20:23:02Z
 machine=e2b.local
