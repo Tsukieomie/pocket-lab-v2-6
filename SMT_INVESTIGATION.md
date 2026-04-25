@@ -325,12 +325,55 @@ The correct statement is:
 
 ---
 
+## Alternative Enable Paths (Priority Order)
+
+### 1. Smokeless UMAF (Try First -- No Flash Required)
+
+Repository: https://github.com/DavidS95/Smokeless_UMAF
+Renoir "U" APUs: explicitly listed as supported.
+
+Smokelessly UMAF is a bootable UEFI application that launches a full AMD CBS
+browser. It reads AmdSetup directly and can expose SMT options that ASUS
+removed from the OEM HII form -- if AGESA still has the code path compiled.
+
+Setup:
+1. Download EFI binary from GitHub releases
+2. FAT32 USB -> /EFI/Boot/bootx64.efi
+3. Boot: F2/Del -> Boot Override -> USB
+4. Device Manager -> AMD CBS -> CPU Common Options -> Performance
+   -> CCD/Core/Thread Enablement -> SMT control -> Enable
+5. Save, reboot, verify
+
+If SMT control does not appear in UMAF: AGESA was compiled without SMT
+for CPUID 0x00860601. UMAF cannot add options AGESA does not support.
+
+### 2. RU.efi or Linux Direct EFI Variable Write
+
+If SMT byte offset in AmdSetup is known:
+- RU.efi from UEFI shell: modify AmdSetup at the byte offset
+- Linux: chattr -i the efivars file, write modified bytes, reboot
+
+Offset must come from CbsBaseDxeRN disassembly or community IFR dumps.
+See BIOS_LAYER1_ANALYSIS.md for the full AmdSetup hex dump and procedure.
+
+Risk: wrong offset = NVRAM corruption (recoverable via CMOS clear).
+
+### 3. Coreboot with SMT-Enabled AGESA (Definitive)
+
+The only path if AGESA was compiled without SMT for 4700U.
+Requires board init code for X513IA (not upstream) + external SPI clip.
+See BIOS_LAYER1_ANALYSIS.md for full requirements.
+
+Reference: https://doc.coreboot.org/mainboard/google/zork.html
+
 ## Next Steps
 
-1. Research ASUS X513IA SPI flash layout and write-protect configuration
-2. Evaluate coreboot Renoir port feasibility for X513IA board init
-3. If coreboot path pursued: build and test on a disposable/backup machine
-   first -- reflashing with bad firmware = brick without SPI clip recovery
+1. Prepare FAT32 USB with Smokeless UMAF -- attempt SMT control via CBS browser
+2. If UMAF fails: disassemble CbsBaseDxeRN (4.8KB) for AmdSetup offset table
+3. If offset found: write AmdSetup SMT byte via Linux efivars or RU.efi
+4. If all EFI variable paths fail: evaluate coreboot Zork port for X513IA
+5. coreboot path: build and test on a disposable/backup machine first --
+   reflashing with bad firmware = brick without SPI clip recovery
 
 ---
 
