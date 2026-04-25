@@ -1,1 +1,8 @@
 bore-port.txt
+
+# BIOS binaries (large, machine-specific — distribute via smt_fetch_bios.sh)
+X513IAAS.308
+X513IAAS.308.smt_patched
+*.smt_patched
+bios_backup_*.bin
+bios_backup_*.bin.sha256

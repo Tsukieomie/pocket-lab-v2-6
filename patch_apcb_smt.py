@@ -26,7 +26,9 @@ if len(sys.argv) < 2:
 BIOS_FILE = sys.argv[1]
 OUT_FILE  = BIOS_FILE + ".smt_patched"
 
-ORIGINAL_SHA256 = "D67902467FD84FF2F8D107CB7FF9551AB48F00379319AC12D7FB4560CA527ACA"
+# SHA256 of the extracted X513IAAS.308 ROM (not the ZIP wrapper)
+# ZIP SHA256 (X513IAAS308.zip from ASUS CDN): D67902467FD84FF2F8D107CB7FF9551AB48F00379319AC12D7FB4560CA527ACA
+ORIGINAL_SHA256 = "329BB6CD3AACA7A5C8911F891E468BBD005813648626E6C4F782850EC2E45378"
 
 print(f"Reading {BIOS_FILE}...")
 with open(BIOS_FILE, 'rb') as f:
@@ -46,10 +48,12 @@ else:
 # APCB token 0x0076 locations:
 # Token entry: [id:2][val:1][pad:2][crc:3] = 8 bytes
 # val byte is at token_start + 2
+# All offsets are into the full X513IAAS.308 BIOS file (16,779,264 bytes)
+# BIOS file = body.bin + 0x800 capsule header; prior versions used body.bin offsets (bug)
 PATCHES = [
     # (token_start, apcb_header_base, description)
-    (0x0029d81f, 0x0029a000, "Primary APCB"),
-    (0x006e281f, 0x006e2000, "Mirror APCB"),
+    (0x0029e01f, 0x0029a800, "Primary APCB"),  # verified via byte-scan 2026-04-25
+    (0x006e601f, 0x006e2800, "Mirror APCB"),   # verified via byte-scan 2026-04-25
 ]
 
 for tok_start, apcb_base, desc in PATCHES:
