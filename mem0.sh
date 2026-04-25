@@ -14,7 +14,14 @@
 MEM0_API="${MEM0_API:-https://api.mem0.ai/v1}"
 MEM0_AGENT="${MEM0_AGENT:-pocket-lab}"
 MEM0_VERSION="${MEM0_VERSION:-v2.8}"
-MEM0_ENV_FILE="${MEM0_ENV_FILE:-/root/.mem0_env}"
+# Prefer ~/.mem0_env on Linux user accounts, /root/.mem0_env on iSH/root
+if [ -z "${MEM0_ENV_FILE:-}" ]; then
+  if [ -f "${HOME}/.mem0_env" ]; then
+    MEM0_ENV_FILE="${HOME}/.mem0_env"
+  else
+    MEM0_ENV_FILE="/root/.mem0_env"
+  fi
+fi
 
 # Load API key from env file if not already set
 _mem0_load_key() {
