@@ -1,6 +1,5 @@
-port=DOWN
-host=people-modification-metropolitan-sources.trycloudflare.com
-ssh=ssh -o ProxyCommand="cloudflared access tcp --hostname https://people-modification-metropolitan-sources.trycloudflare.com" user@localhost
-updated=2026-04-25T06:21:16Z
-machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
-tunnel=cloudflared
+port=40007
+host=188.93.146.98
+ssh=ssh -p 40007 user@188.93.146.98
+updated=2026-04-25T13:47:13Z
+machine=e2b.local
