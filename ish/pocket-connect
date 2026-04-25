@@ -1,0 +1,183 @@
+#!/bin/sh
+# Pocket Lab iSH connection helper.
+# Starts/refreshes Dropbear + bore and prints the SSH command to reach this iSH.
+
+set -u
+
+SSH_PORT="${POCKET_SSH_PORT:-2226}"
+BORE_SERVER="${POCKET_BORE_SERVER:-161.35.110.36}"
+ROOT_DIR="${POCKET_ROOT_DIR:-/root/pocket-lab-v2-6}"
+DROPBEAR_KEY="${POCKET_DROPBEAR_KEY:-/etc/dropbear/dropbear_ed25519_hostkey}"
+DROPBEAR_LOG="${POCKET_DROPBEAR_LOG:-/tmp/pocket-dropbear-${SSH_PORT}.log}"
+BORE_LOG="${POCKET_BORE_LOG:-/tmp/pocket-bore-${SSH_PORT}.log}"
+DROPBEAR_PID="${POCKET_DROPBEAR_PID:-/tmp/pocket-dropbear-${SSH_PORT}.pid}"
+BORE_PID="${POCKET_BORE_PID:-/tmp/pocket-bore-${SSH_PORT}.pid}"
+MODE="${1:-start}"
+
+say() { printf '%s\n' "$*"; }
+die() { say "ERROR: $*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+listener_on_port() {
+  netstat -ltnp 2>/dev/null | grep -E "[.:]${SSH_PORT} .*LISTEN" || true
+}
+
+is_dropbear_on_port() {
+  # iSH/BusyBox netstat often reports the process column as "-", so we cannot
+  # reliably map a listener back to the Dropbear PID. If the port is listening
+  # and at least one Dropbear process exists, treat it as healthy.
+  [ -n "$(listener_on_port)" ] && ps | grep '[d]ropbear' >/dev/null 2>&1
+}
+
+pid_alive() {
+  [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null
+}
+
+ensure_packages() {
+  if ! have apk; then
+    return 0
+  fi
+  missing=""
+  have dropbear || missing="$missing dropbear"
+  have dropbearkey || missing="$missing dropbear"
+  have netstat || missing="$missing net-tools"
+  if [ -n "$missing" ]; then
+    say "[packages] installing:$missing"
+    apk add --no-cache $missing || say "[packages] install warning: one or more packages failed"
+  fi
+  if ! find_bore >/dev/null 2>&1; then
+    say "[packages] warning: bore not found in PATH, /usr/local/bin, or ~/.local/bin"
+    say "[packages] Alpine may not package bore; install it manually or rerun run_in_perplexity.sh"
+  fi
+}
+
+find_bore() {
+  if have bore; then
+    command -v bore
+    return 0
+  fi
+  if [ -x /usr/local/bin/bore ]; then
+    say /usr/local/bin/bore
+    return 0
+  fi
+  if [ -x "$HOME/.local/bin/bore" ]; then
+    say "$HOME/.local/bin/bore"
+    return 0
+  fi
+  return 1
+}
+
+ensure_keys() {
+  mkdir -p /root/.ssh /etc/dropbear
+  chmod 700 /root/.ssh
+  touch /root/.ssh/authorized_keys
+  chmod 600 /root/.ssh/authorized_keys
+
+  if [ ! -f "$DROPBEAR_KEY" ]; then
+    have dropbearkey || die "dropbearkey not found; run: apk add dropbear"
+    say "[dropbear] generating host key: $DROPBEAR_KEY"
+    dropbearkey -t ed25519 -f "$DROPBEAR_KEY" >/tmp/pocket-dropbearkey.log 2>&1 || {
+      cat /tmp/pocket-dropbearkey.log >&2
+      die "failed to generate Dropbear host key"
+    }
+  fi
+}
+
+stop_managed() {
+  if [ -f "$BORE_PID" ]; then
+    kill "$(cat "$BORE_PID")" 2>/dev/null || true
+    rm -f "$BORE_PID"
+  fi
+  if [ -f "$DROPBEAR_PID" ]; then
+    kill "$(cat "$DROPBEAR_PID")" 2>/dev/null || true
+    rm -f "$DROPBEAR_PID"
+  fi
+  pkill -f "bore local ${SSH_PORT} --to ${BORE_SERVER}" 2>/dev/null || true
+}
+
+start_dropbear() {
+  if is_dropbear_on_port; then
+    say "[dropbear] already listening on port $SSH_PORT"
+    return 0
+  fi
+
+  occupied="$(listener_on_port)"
+  if [ -n "$occupied" ]; then
+    say "$occupied"
+    if ps | grep '[d]ropbear' >/dev/null 2>&1; then
+      say "[dropbear] port $SSH_PORT is already listening; iSH does not expose listener PIDs, assuming existing Dropbear is healthy"
+      return 0
+    fi
+    die "port $SSH_PORT is occupied by a non-Dropbear process; set POCKET_SSH_PORT=2227 or run: pocket-stop"
+  fi
+
+  : >"$DROPBEAR_LOG"
+  dropbear -F -E -p "$SSH_PORT" -r "$DROPBEAR_KEY" 2>"$DROPBEAR_LOG" &
+  db_pid="$!"
+  echo "$db_pid" >"$DROPBEAR_PID"
+  sleep 2
+
+  if [ -n "$(listener_on_port)" ] || pid_alive "$db_pid"; then
+    say "[dropbear] listening on local port $SSH_PORT"
+    return 0
+  else
+    cat "$DROPBEAR_LOG" >&2
+    die "Dropbear did not start on port $SSH_PORT"
+  fi
+}
+
+start_bore() {
+  BORE_BIN="$(find_bore)" || die "bore not found; install it or put it at /usr/local/bin/bore"
+
+  if ps | grep -F "bore local ${SSH_PORT} --to ${BORE_SERVER}" | grep -v grep >/dev/null 2>&1; then
+    say "[bore] tunnel process already running for $SSH_PORT -> $BORE_SERVER"
+  else
+    : >"$BORE_LOG"
+    "$BORE_BIN" local "$SSH_PORT" --to "$BORE_SERVER" >"$BORE_LOG" 2>&1 &
+    echo "$!" >"$BORE_PID"
+    sleep 4
+  fi
+
+  line="$(grep 'listening at ' "$BORE_LOG" 2>/dev/null | tail -1 || true)"
+  if [ -z "$line" ]; then
+    cat "$BORE_LOG" >&2
+    die "bore did not report a listening port"
+  fi
+
+  host="$(printf '%s\n' "$line" | sed -n 's/.*listening at \([^: ][^: ]*\):\([0-9][0-9]*\).*/\1/p' | tail -1)"
+  port="$(printf '%s\n' "$line" | sed -n 's/.*listening at \([^: ][^: ]*\):\([0-9][0-9]*\).*/\2/p' | tail -1)"
+  [ -n "$host" ] && [ -n "$port" ] || die "could not parse bore host/port from: $line"
+
+  if [ -d "$ROOT_DIR" ]; then
+    printf 'port=%s host=%s\n' "$port" "$host" >"$ROOT_DIR/bore-port.txt"
+  fi
+
+  say "[bore] listening at $host:$port"
+  say "[ssh] ssh -p $port root@$host"
+  say "[logs] dropbear=$DROPBEAR_LOG bore=$BORE_LOG"
+}
+
+case "$MODE" in
+  start)
+    ensure_packages
+    ensure_keys
+    start_dropbear
+    start_bore
+    ;;
+  restart)
+    stop_managed
+    ensure_packages
+    ensure_keys
+    start_dropbear
+    start_bore
+    ;;
+  stop)
+    stop_managed
+    say "[stop] stopped managed Pocket tunnel processes for port $SSH_PORT"
+    ;;
+  *)
+    say "Usage: pocket-connect [start|restart|stop]"
+    say "Env: POCKET_SSH_PORT=$SSH_PORT POCKET_BORE_SERVER=$BORE_SERVER POCKET_ROOT_DIR=$ROOT_DIR"
+    exit 64
+    ;;
+esac

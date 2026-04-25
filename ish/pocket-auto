@@ -1,0 +1,56 @@
+#!/bin/sh
+# pocket-auto — convenience launcher: bring tunnel up and start watchdog.
+#
+# Usage:
+#   pocket-auto              # start (default)
+#   pocket-auto start
+#   pocket-auto stop
+#   pocket-auto status
+#   pocket-auto restart
+#
+# Honours the same env vars as pocket-connect / pocket-watch:
+#   POCKET_SSH_PORT     local Dropbear port (default 2232)
+#   POCKET_BORE_SERVER  bore server hostname/IP (default bore.pub)
+#   POCKET_ROOT_DIR     repo root for bore-port.txt (default /root/pocket-lab-v2-6)
+
+set -u
+
+SSH_PORT="${POCKET_SSH_PORT:-2232}"
+BORE_SERVER="${POCKET_BORE_SERVER:-bore.pub}"
+ROOT_DIR="${POCKET_ROOT_DIR:-/root/pocket-lab-v2-6}"
+MODE="${1:-start}"
+
+export POCKET_SSH_PORT POCKET_BORE_SERVER POCKET_ROOT_DIR
+POCKET_SSH_PORT="$SSH_PORT"
+POCKET_BORE_SERVER="$BORE_SERVER"
+POCKET_ROOT_DIR="$ROOT_DIR"
+
+CONNECT="$(command -v pocket-connect 2>/dev/null || echo /usr/local/bin/pocket-connect)"
+WATCH="$(command -v pocket-watch 2>/dev/null || echo /usr/local/bin/pocket-watch)"
+STOP="$(command -v pocket-stop 2>/dev/null || echo /usr/local/bin/pocket-stop)"
+STATUS="$(command -v pocket-status 2>/dev/null || echo /usr/local/bin/pocket-status)"
+
+case "$MODE" in
+  start)
+    "$CONNECT" restart
+    "$WATCH" start
+    ;;
+  restart)
+    "$WATCH" stop || true
+    "$CONNECT" restart
+    "$WATCH" start
+    ;;
+  stop)
+    "$WATCH" stop || true
+    "$STOP"
+    ;;
+  status)
+    "$WATCH" status || true
+    echo
+    "$STATUS"
+    ;;
+  *)
+    echo "Usage: pocket-auto [start|restart|stop|status]" >&2
+    exit 64
+    ;;
+esac

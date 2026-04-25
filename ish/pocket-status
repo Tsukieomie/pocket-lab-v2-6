@@ -1,0 +1,58 @@
+#!/bin/sh
+# Pocket Lab iSH connection status helper.
+
+SSH_PORT="${POCKET_SSH_PORT:-2226}"
+ROOT_DIR="${POCKET_ROOT_DIR:-/root/pocket-lab-v2-6}"
+
+say() { printf '%s\n' "$*"; }
+
+say "== pocket-status =="
+date 2>/dev/null || true
+say "host=$(hostname 2>/dev/null || echo localhost)"
+say "pwd=$(pwd)"
+say
+
+say "== repo =="
+if [ -d "$ROOT_DIR/.git" ]; then
+  (cd "$ROOT_DIR" && {
+    printf 'path=%s\n' "$PWD"
+    printf 'branch='; git branch --show-current 2>/dev/null || true
+    printf 'head='; git rev-parse --short HEAD 2>/dev/null || true
+    [ -f bore-port.txt ] && { printf 'bore-port.txt='; cat bore-port.txt; }
+  })
+else
+  say "repo not found at $ROOT_DIR"
+fi
+say
+
+say "== auth =="
+if [ -f /root/.ssh/authorized_keys ]; then
+  printf 'authorized_keys_bytes='
+  wc -c </root/.ssh/authorized_keys
+  grep -q 'perplexity-computer-ish-session' /root/.ssh/authorized_keys && say "perplexity_session_key=yes" || say "perplexity_session_key=no"
+else
+  say "authorized_keys=missing"
+fi
+say
+
+say "== listeners =="
+netstat -ltnp 2>/dev/null | grep -E ':(22[0-9][0-9]|2222|2226|2227|2228|2229|2230|2231|2232|2233|2234|2235)' || say "no Pocket-style SSH listeners found"
+say
+
+say "== processes =="
+ps | grep -E 'dropbear|sshd|bore' | grep -v grep || say "no ssh/bore processes"
+say
+
+say "== recent logs =="
+for f in \
+  /tmp/pocket-dropbear-*.log \
+  /tmp/pocket-bore-*.log \
+  /tmp/dropbear-22*.log \
+  /tmp/bore-perplexity-22*.log \
+  /tmp/pocket-upgrade.log \
+  /tmp/pocket-targeted-install.log
+do
+  [ -f "$f" ] || continue
+  say "-- $f --"
+  tail -10 "$f"
+done

@@ -1,0 +1,104 @@
+#!/bin/sh
+# Pocket Lab iSH tunnel watchdog.
+# Keeps a single Dropbear + bore tunnel alive and records the current SSH line.
+
+set -u
+
+SSH_PORT="${POCKET_SSH_PORT:-2231}"
+BORE_SERVER="${POCKET_BORE_SERVER:-161.35.110.36}"
+ROOT_DIR="${POCKET_ROOT_DIR:-/root/pocket-lab-v2-6}"
+INTERVAL="${POCKET_WATCH_INTERVAL:-25}"
+LOG="${POCKET_WATCH_LOG:-/tmp/pocket-watch-${SSH_PORT}.log}"
+PIDFILE="${POCKET_WATCH_PID:-/tmp/pocket-watch-${SSH_PORT}.pid}"
+CURRENT="${POCKET_CURRENT_SSH:-/tmp/pocket-current-ssh}"
+
+say() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)" "$*" | tee -a "$LOG"
+}
+
+listener_ok() {
+  netstat -ltnp 2>/dev/null | grep -E "[.:]${SSH_PORT} .*LISTEN" >/dev/null 2>&1
+}
+
+bore_ok() {
+  if [ -f "/tmp/pocket-bore-${SSH_PORT}.pid" ] && kill -0 "$(cat "/tmp/pocket-bore-${SSH_PORT}.pid")" 2>/dev/null; then
+    return 0
+  fi
+  # Fallback for older helpers/manual starts. BusyBox ps may truncate command
+  # arguments, so avoid depending on the full bore command line.
+  ps | grep '[b]ore' | grep -q "${SSH_PORT}"
+}
+
+latest_port() {
+  grep 'listening at ' "/tmp/pocket-bore-${SSH_PORT}.log" 2>/dev/null \
+    | tail -1 \
+    | sed -n 's/.*listening at \([^: ][^: ]*\):\([0-9][0-9]*\).*/\1 \2/p'
+}
+
+record_current() {
+  hp="$(latest_port || true)"
+  [ -n "$hp" ] || return 0
+  host="${hp% *}"
+  port="${hp#* }"
+  {
+    printf 'port=%s host=%s\n' "$port" "$host"
+    printf 'ssh=ssh -p %s root@%s\n' "$port" "$host"
+    printf 'updated=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"
+    printf 'machine=%s\n' "$(hostname 2>/dev/null || echo localhost)"
+    printf 'local_port=%s\n' "$SSH_PORT"
+  } >"$CURRENT"
+  if [ -d "$ROOT_DIR" ]; then
+    cp "$CURRENT" "$ROOT_DIR/bore-port.txt" 2>/dev/null || true
+  fi
+}
+
+start_once() {
+  POCKET_SSH_PORT="$SSH_PORT" POCKET_BORE_SERVER="$BORE_SERVER" /usr/local/bin/pocket-connect restart >>"$LOG" 2>&1
+  record_current
+}
+
+case "${1:-run}" in
+  start)
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+      say "[watch] already running pid=$(cat "$PIDFILE")"
+      exit 0
+    fi
+    nohup "$0" run >/tmp/pocket-watch-start.log 2>&1 &
+    echo "$!" >"$PIDFILE"
+    say "[watch] started pid=$(cat "$PIDFILE") port=$SSH_PORT server=$BORE_SERVER"
+    ;;
+  stop)
+    if [ -f "$PIDFILE" ]; then
+      kill "$(cat "$PIDFILE")" 2>/dev/null || true
+      rm -f "$PIDFILE"
+    fi
+    pkill -f "pocket-watch.*run" 2>/dev/null || true
+    say "[watch] stopped"
+    ;;
+  status)
+    echo "pidfile=$PIDFILE"
+    [ -f "$PIDFILE" ] && echo "pid=$(cat "$PIDFILE")"
+    [ -f "$CURRENT" ] && cat "$CURRENT"
+    listener_ok && echo "listener=ok" || echo "listener=down"
+    bore_ok && echo "bore=ok" || echo "bore=down"
+    ;;
+  run)
+    echo "$$" >"$PIDFILE"
+    say "[watch] run loop starting port=$SSH_PORT server=$BORE_SERVER interval=${INTERVAL}s"
+    while :; do
+      if ! listener_ok || ! bore_ok; then
+        say "[watch] unhealthy listener=$(listener_ok && echo ok || echo down) bore=$(bore_ok && echo ok || echo down); restarting"
+        start_once
+        sleep 3
+        record_current
+      else
+        record_current
+      fi
+      sleep "$INTERVAL"
+    done
+    ;;
+  *)
+    echo "Usage: pocket-watch [start|stop|status|run]"
+    exit 64
+    ;;
+esac

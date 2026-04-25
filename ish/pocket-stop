@@ -1,0 +1,20 @@
+#!/bin/sh
+# Stop Pocket Lab managed tunnel processes.
+
+SSH_PORT="${POCKET_SSH_PORT:-2226}"
+BORE_SERVER="${POCKET_BORE_SERVER:-161.35.110.36}"
+
+kill_pidfile() {
+  f="$1"
+  if [ -f "$f" ]; then
+    kill "$(cat "$f")" 2>/dev/null || true
+    rm -f "$f"
+  fi
+}
+
+kill_pidfile "/tmp/pocket-bore-${SSH_PORT}.pid"
+kill_pidfile "/tmp/pocket-dropbear-${SSH_PORT}.pid"
+pkill -f "bore local ${SSH_PORT} --to ${BORE_SERVER}" 2>/dev/null || true
+pkill -f "dropbear .* -p ${SSH_PORT}" 2>/dev/null || true
+
+printf 'Stopped Pocket Lab managed processes for port %s.\n' "$SSH_PORT"

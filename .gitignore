@@ -1,4 +1,22 @@
+# Runtime tunnel state — bore external ports rotate every session.
 bore-port.txt
+pocket-current-ssh
+
+# Logs
+*.log
+
+# SSH / Dropbear secrets — never commit private device material.
+# (linux/security/authorized_keys is already tracked and contains only a
+# public computer-session key; gitignore does not retroactively untrack.)
+**/authorized_keys
+**/dropbear_*_hostkey
+**/dropbear_*_hostkey.pub
+**/ssh_host_*_key
+**/ssh_host_*_key.pub
+*.pem
+id_rsa
+id_ed25519
+.bore_env
 
 # BIOS binaries (large, machine-specific — distribute via smt_fetch_bios.sh)
 X513IAAS.308
