@@ -555,9 +555,9 @@ def _print_progress(results: dict, model_keys: list, timeout: int):
             col = r.color
             if r.done:
                 if r.error:
-                    parts.append(f"{col}✗ {k}{RESET}")
+                    parts.append(f"{col} {k}{RESET}")
                 else:
-                    parts.append(f"{col}✓ {k} ({r.elapsed}s){RESET}")
+                    parts.append(f"{col} {k} ({r.elapsed}s){RESET}")
             else:
                 parts.append(f"{DIM}{spinner[i % len(spinner)]} {k}{RESET}")
 
@@ -592,10 +592,10 @@ def print_results(results: list, prompt: str):
     for r in results:
         col = r.color
         if r.error:
-            status = f"{RED}✗ ERROR{RESET}"
+            status = f"{RED} ERROR{RESET}"
             body   = f"{RED}{r.error}{RESET}"
         else:
-            status = f"{GREEN}✓ {r.elapsed}s{RESET}"
+            status = f"{GREEN} {r.elapsed}s{RESET}"
             # Wrap body to terminal width
             wrapped = textwrap.fill(r.text.strip(), width=width - 4,
                                     subsequent_indent="    ")
@@ -845,12 +845,12 @@ def main():
             env   = cfg.get("env")
             local = env is None
             if key in available:
-                status = f"{GREEN}✓ ready{RESET}"
+                status = f"{GREEN} ready{RESET}"
             elif local:
-                status = f"{RED}✗ Ollama not running{RESET}"
+                status = f"{RED} Ollama not running{RESET}"
             else:
                 missing_env = env or ""
-                status = f"{RED}✗ {missing_env} not set{RESET}"
+                status = f"{RED} {missing_env} not set{RESET}"
             print(f"  {cfg['color']}{key:<16}{RESET} {cfg['label']:<30} {status}")
         print()
         sys.exit(0)

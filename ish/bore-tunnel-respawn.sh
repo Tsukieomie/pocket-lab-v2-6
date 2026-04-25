@@ -114,7 +114,7 @@ PORTFILE
     --method=PUT \
     "https://api.github.com/repos/${APPROVAL_REPO}/contents/bore-port.txt" \
     > /dev/null 2>&1 \
-    && echo "[bore-ish] GitHub bore-port.txt updated ✓" \
+    && echo "[bore-ish] GitHub bore-port.txt updated " \
     || echo "[bore-ish] GitHub push failed (non-fatal)"
 }
 

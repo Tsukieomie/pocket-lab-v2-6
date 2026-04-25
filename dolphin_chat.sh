@@ -28,7 +28,7 @@ RED="\033[91m"
 check_ollama() {
     curl -sf "${OLLAMA_URL}/api/tags" > /dev/null 2>&1
     if [ $? -ne 0 ]; then
-        echo -e "${RED}✗ Ollama not running at ${OLLAMA_URL}${RESET}"
+        echo -e "${RED} Ollama not running at ${OLLAMA_URL}${RESET}"
         echo -e "  Start it with: ${DIM}ollama serve${RESET}"
         exit 1
     fi

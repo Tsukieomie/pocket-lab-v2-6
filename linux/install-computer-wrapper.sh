@@ -108,7 +108,7 @@ else
     npm install --no-audit --no-fund --omit=optional
   )
   if [ -x "$ELECTRON_BIN" ]; then
-    echo "[wrapper] Electron installed ✓"
+    echo "[wrapper] Electron installed "
   else
     echo "[wrapper] WARNING: Electron binary not found at ${ELECTRON_BIN}"
     echo "[wrapper] Check: cd ${WRAPPER_DIR} && npm install"

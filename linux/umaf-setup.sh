@@ -52,7 +52,7 @@ fi
 
 if [ -z "$USB_DEV" ]; then
     echo ""
-    echo "  ❌ No USB drive detected."
+    echo "   No USB drive detected."
     echo "  Please plug in a USB drive and re-run, or specify it:"
     echo "    bash ~/pocket-lab-v2-6/linux/umaf-setup.sh /dev/sdX"
     echo ""
@@ -63,7 +63,7 @@ fi
 
 # Safety check — make sure it's not the NVMe
 if echo "$USB_DEV" | grep -q "nvme"; then
-    echo "  ❌ ERROR: $USB_DEV looks like your NVMe SSD — refusing to format it!"
+    echo "   ERROR: $USB_DEV looks like your NVMe SSD — refusing to format it!"
     echo "  Please specify your USB drive explicitly."
     exit 1
 fi
@@ -71,7 +71,7 @@ fi
 USB_SIZE=$(lsblk -o NAME,SIZE "$USB_DEV" | grep "$(basename $USB_DEV) " | awk '{print $2}')
 echo "  Found USB: $USB_DEV ($USB_SIZE)"
 echo ""
-echo "  ⚠️  WARNING: $USB_DEV ($USB_SIZE) will be FORMATTED (all data erased)"
+echo "    WARNING: $USB_DEV ($USB_SIZE) will be FORMATTED (all data erased)"
 read -p "  Type YES to continue: " CONFIRM
 if [ "$CONFIRM" != "YES" ]; then
     echo "  Aborted."
@@ -123,7 +123,7 @@ sudo unzip -o "$UMAF_ZIP" -d "$MOUNT_POINT/" 2>&1 | tail -5
 
 # Verify EFI structure exists
 if [ ! -d "$MOUNT_POINT/EFI" ]; then
-    echo "  ⚠️  No EFI folder found in zip root — checking subdirs..."
+    echo "    No EFI folder found in zip root — checking subdirs..."
     SUBDIR=$(ls "$MOUNT_POINT" | head -1)
     if [ -d "$MOUNT_POINT/$SUBDIR/EFI" ]; then
         echo "  Found EFI in $SUBDIR/ — moving to root..."
@@ -192,7 +192,7 @@ echo "║  6. Find:   SMT Control → set to Enable             ║"
 echo "║  7. Press Escape → Save → Continue                  ║"
 echo "║  8. Ubuntu boots normally with SMT enabled          ║"
 echo "║"
-echo "║  ⚠️  ONLY change SMT Control — nothing else!        ║"
+echo "║    ONLY change SMT Control — nothing else!        ║"
 echo "║  Touching other settings can brick the laptop.      ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""

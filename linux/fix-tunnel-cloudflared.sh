@@ -168,7 +168,7 @@ elif [ -f "$BORE_ENV" ]; then
   fi
 fi
 
-$PUSH_OK && echo "  GitHub bore-port.txt synced ✓" || echo "  GitHub push skipped (non-fatal)"
+$PUSH_OK && echo "  GitHub bore-port.txt synced " || echo "  GitHub push skipped (non-fatal)"
 
 # ── Also push to tunnel-host.txt (tracked, API-only, no merge conflicts) ──
 # Perplexity Computer reads tunnel-host.txt from the repo each session
@@ -207,7 +207,7 @@ elif [ -n "${GH_TOKEN:-}" ]; then
     && TH_PUSH_OK=true || true
 fi
 $TH_PUSH_OK \
-  && echo "  GitHub tunnel-host.txt synced ✓ (Perplexity Computer will auto-read this)" \
+  && echo "  GitHub tunnel-host.txt synced  (Perplexity Computer will auto-read this)" \
   || echo "  tunnel-host.txt push skipped (non-fatal)"
 
 # ── Done ─────────────────────────────────────────────────────

@@ -81,9 +81,9 @@ fi
 echo "[5/5] Verifying..."
 sleep 2
 if sudo systemctl is-active bore-tunnel >/dev/null 2>&1; then
-  echo "   ✓ bore-tunnel service is RUNNING"
+  echo "    bore-tunnel service is RUNNING"
 else
-  echo "   ✗ bore-tunnel service FAILED — check: sudo journalctl -u bore-tunnel"
+  echo "    bore-tunnel service FAILED — check: sudo journalctl -u bore-tunnel"
 fi
 
 VPS_IP=$(curl -sf https://icanhazip.com || echo "UNKNOWN")

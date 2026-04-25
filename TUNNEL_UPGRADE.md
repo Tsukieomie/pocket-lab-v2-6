@@ -15,10 +15,10 @@ No one can connect without the shared secret. Port hijacking becomes impossible.
 
 | Tool | i686 musl binary | Auth support | Binary size | Complexity |
 |------|-------------------|-------------|-------------|------------|
-| **bore (self-hosted)** | ✅ 2.5 MB static | ✅ `--secret` HMAC | 2.5 MB | Low — same CLI you already use |
-| chisel | ✅ 10 MB static | ✅ `--auth` | 10 MB | Medium — different CLI |
-| rathole | ❌ No i386 build | ✅ token | N/A | Medium — TOML config |
-| SSH reverse tunnel | ✅ (already have SSH) | ✅ key-based | 0 (built-in) | Low — but needs VPS sshd |
+| **bore (self-hosted)** |  2.5 MB static |  `--secret` HMAC | 2.5 MB | Low — same CLI you already use |
+| chisel |  10 MB static |  `--auth` | 10 MB | Medium — different CLI |
+| rathole |  No i386 build |  token | N/A | Medium — TOML config |
+| SSH reverse tunnel |  (already have SSH) |  key-based | 0 (built-in) | Low — but needs VPS sshd |
 
 **Recommendation:** Self-hosted bore — same tool, same workflow, just add `--secret`.
 
@@ -162,7 +162,7 @@ chisel client YOUR_VPS_IP:8080 R:40188:127.0.0.1:2222 --auth user:password
 
 | Approach | Port hijack safe | Reconnect | Binary needed | Monthly cost |
 |----------|-----------------|-----------|---------------|-------------|
-| bore.pub (current) | ❌ NO | Manual | bore (already have) | Free |
-| **Self-hosted bore** | ✅ YES | Manual | bore (upgrade to v0.6.0) | $3-5/mo |
-| SSH reverse tunnel | ✅ YES | autossh/loop | None (built-in) | $3-5/mo |
-| Chisel | ✅ YES | Auto-retry | chisel 386 (10 MB) | $3-5/mo |
+| bore.pub (current) |  NO | Manual | bore (already have) | Free |
+| **Self-hosted bore** |  YES | Manual | bore (upgrade to v0.6.0) | $3-5/mo |
+| SSH reverse tunnel |  YES | autossh/loop | None (built-in) | $3-5/mo |
+| Chisel |  YES | Auto-retry | chisel 386 (10 MB) | $3-5/mo |

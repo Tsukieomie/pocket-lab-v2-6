@@ -104,7 +104,7 @@ echo "New token: $NEW_TOKEN"
 | POST | `/write` | write file (body: `{path, content}`) — if enabled |
 | POST | `/exec` | run shell command — gated by `EXEC_ALLOW=true` in `~/.bore_env` |
 
-> ⚠️ `exec_allow:true` means the bearer token grants **shell-as-kenny** on the laptop. Treat the token like an SSH key.
+>  `exec_allow:true` means the bearer token grants **shell-as-kenny** on the laptop. Treat the token like an SSH key.
 
 ---
 

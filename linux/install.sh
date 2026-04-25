@@ -71,7 +71,7 @@ echo ">> Installing Perplexity Computer / Comet Electron wrapper..."
 # without aborting the rest of install.sh (we tolerate failure here so that
 # tunnel/ssh setup still completes on machines without Node).
 if bash "$REPO_DIR/install-computer-wrapper.sh"; then
-  echo "   wrapper installed ✓"
+  echo "   wrapper installed "
 else
   echo "   WARNING: wrapper install did not complete — install node/npm and run:"
   echo "     bash $REPO_DIR/install-computer-wrapper.sh"
@@ -136,7 +136,7 @@ _keyscan_host() {
     echo "$SCANNED" >> "${HOME}/.ssh/known_hosts"
     local COUNT
     COUNT=$(echo "$SCANNED" | wc -l)
-    echo "   ${HOST}: added ${COUNT} key(s) ✓"
+    echo "   ${HOST}: added ${COUNT} key(s) "
   else
     echo "   ${HOST}: keyscan failed (host unreachable or port blocked) — skipping"
     echo "   (SSH will prompt on first connect; run install.sh again when connected)"
@@ -203,7 +203,7 @@ if [ -z "$CURRENT_TOKEN" ]; then
     read -r -p "   GitHub Personal Access Token (ghp_...): " INPUT_TOKEN
     if [ -n "$INPUT_TOKEN" ]; then
       _bore_env_set GH_TOKEN "$INPUT_TOKEN"
-      echo "   GH_TOKEN saved to ~/.bore_env ✓"
+      echo "   GH_TOKEN saved to ~/.bore_env "
     else
       echo "   Skipped — run: nano ~/.bore_env  to add GH_TOKEN later"
     fi
@@ -212,7 +212,7 @@ if [ -z "$CURRENT_TOKEN" ]; then
     echo "   Non-interactive mode — set GH_TOKEN in ~/.bore_env manually"
   fi
 else
-  echo "   GH_TOKEN already set in ~/.bore_env ✓"
+  echo "   GH_TOKEN already set in ~/.bore_env "
 fi
 
 echo ""

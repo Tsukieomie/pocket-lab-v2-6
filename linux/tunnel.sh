@@ -224,7 +224,7 @@ PORTFILE
     return 0
   fi
 
-  $PUSH_OK && echo "[tunnel] GitHub bore-port.txt synced ✓ (port=${PORT_VAL} host=${BORE_HOST})" || true
+  $PUSH_OK && echo "[tunnel] GitHub bore-port.txt synced  (port=${PORT_VAL} host=${BORE_HOST})" || true
 }
 
 # Keep old alias
@@ -266,7 +266,7 @@ push_tunnel_host() {
         -f message="$MSG" -f content="$ENCODED" \
         --jq '.commit.sha' >/dev/null 2>&1 && PUSH_OK=true || true
     fi
-    $PUSH_OK && echo "[tunnel] tunnel-host.txt synced to GitHub ✓ (${CF_HOST})" && return 0 || true
+    $PUSH_OK && echo "[tunnel] tunnel-host.txt synced to GitHub  (${CF_HOST})" && return 0 || true
   fi
 
   # ── Path 2: curl + GH_TOKEN ──
@@ -291,7 +291,7 @@ push_tunnel_host() {
       -H "Content-Type: application/json" \
       -d "$PAYLOAD" \
       "https://api.github.com/repos/${REPO}/contents/${FILE}" >/dev/null \
-      && echo "[tunnel] tunnel-host.txt synced to GitHub ✓ (${CF_HOST}) [curl]" && return 0 \
+      && echo "[tunnel] tunnel-host.txt synced to GitHub  (${CF_HOST}) [curl]" && return 0 \
       || echo "[tunnel] tunnel-host.txt GitHub push failed (non-fatal)"
   else
     echo "[tunnel] No gh auth and no GH_TOKEN — tunnel-host.txt not pushed (set GH_TOKEN in ~/.bore_env)"
@@ -572,7 +572,7 @@ case "$CMD" in
       if [ "${SAVED_PORT:-}" != "$LIVE_PORT" ]; then
         echo "[live]     WARNING: bore-port.txt shows port=${SAVED_PORT} but live is ${LIVE_PORT} — run: bash $0 sync-port"
       else
-        echo "[live]     bore-port.txt in sync ✓"
+        echo "[live]     bore-port.txt in sync "
       fi
     else
       echo "[live]     no live bore port detected"
@@ -584,9 +584,9 @@ case "$CMD" in
     if [ -n "$CHECK_PORT" ] && echo "$CHECK_PORT" | grep -qE '^[0-9]+$'; then
       echo "[reach]    checking ${CHECK_HOST}:${CHECK_PORT} ..."
       if timeout 5 bash -c "echo >/dev/tcp/${CHECK_HOST}/${CHECK_PORT}" 2>/dev/null; then
-        echo "[reach]    ✓ TCP reachable — tunnel is live"
+        echo "[reach]     TCP reachable — tunnel is live"
       else
-        echo "[reach]    ✗ TCP unreachable — bore server may be down or port expired"
+        echo "[reach]     TCP unreachable — bore server may be down or port expired"
       fi
     else
       echo "[reach]    skipped (no numeric port available)"
@@ -688,7 +688,7 @@ PORTFILE
         fi
 
         $PUSH_OK_CF \
-          && echo "[tunnel] GitHub bore-port.txt synced ✓ (cloudflared host=${CF_HOST_LIVE})" \
+          && echo "[tunnel] GitHub bore-port.txt synced  (cloudflared host=${CF_HOST_LIVE})" \
           || echo "[tunnel] GitHub push failed — no gh auth and no GH_TOKEN in ~/.bore_env"
       }
       _cf_github_push
@@ -755,20 +755,20 @@ PORTFILE
       read -r NEW_TOKEN
       NEW_TOKEN=$(echo "$NEW_TOKEN" | tr -d '[:space:]')
       if [ -z "$NEW_TOKEN" ]; then
-        echo "  ✗ No token entered — skipping rotation"
+        echo "   No token entered — skipping rotation"
         return 1
       fi
       # Validate new token before writing
       NEW_STATUS=$(_test_token "$NEW_TOKEN")
       if [ "$NEW_STATUS" != "ok" ]; then
-        echo "  ✗ New token check failed (${NEW_STATUS}) — not saving"
+        echo "   New token check failed (${NEW_STATUS}) — not saving"
         return 1
       fi
       # Rotate in ~/.bore_env
       grep -v '^GH_TOKEN=' "$BORE_ENV" > /tmp/_bore_env_tmp 2>/dev/null || true
       echo "GH_TOKEN=${NEW_TOKEN}" >> /tmp/_bore_env_tmp
       mv /tmp/_bore_env_tmp "$BORE_ENV"
-      echo "  ✓ GH_TOKEN rotated in ${BORE_ENV}"
+      echo "   GH_TOKEN rotated in ${BORE_ENV}"
       # Re-export for rest of diagnose run
       GH_TOKEN_VAL="$NEW_TOKEN"
       return 0
@@ -778,18 +778,18 @@ PORTFILE
     TOKEN_STATUS=$(_test_token "$GH_TOKEN_VAL")
     case "$TOKEN_STATUS" in
       ok)
-        echo "  ✓ GH_TOKEN valid (read + write confirmed)"
+        echo "   GH_TOKEN valid (read + write confirmed)"
         ;;
       missing)
-        echo "  ✗ GH_TOKEN missing from ${BORE_ENV}"
+        echo "   GH_TOKEN missing from ${BORE_ENV}"
         _rotate_token || FAILED=$((FAILED+1))
         ;;
       no_read)
-        echo "  ✗ GH_TOKEN present but GitHub returned 4xx on read — token may be expired or revoked"
+        echo "   GH_TOKEN present but GitHub returned 4xx on read — token may be expired or revoked"
         _rotate_token || FAILED=$((FAILED+1))
         ;;
       no_write)
-        echo "  ✗ GH_TOKEN present but has no Contents write permission"
+        echo "   GH_TOKEN present but has no Contents write permission"
         echo "    (fine-grained PAT without 'Contents: Read and write', or missing 'repo' scope)"
         _rotate_token || FAILED=$((FAILED+1))
         ;;
@@ -799,19 +799,19 @@ PORTFILE
     echo "[check 2/4] bore binary ..."
     BORE_BIN=$(_bore_bin)
     if [ -z "$BORE_BIN" ]; then
-      echo "  ✗ bore binary not found"
+      echo "   bore binary not found"
       echo "  → Auto-installing..."
-      install_bore && BORE_BIN=$(_bore_bin) && echo "  ✓ bore installed: $BORE_BIN" || { echo "  ✗ install failed"; FAILED=$((FAILED+1)); }
+      install_bore && BORE_BIN=$(_bore_bin) && echo "   bore installed: $BORE_BIN" || { echo "   install failed"; FAILED=$((FAILED+1)); }
     else
-      echo "  ✓ bore binary: $BORE_BIN"
+      echo "   bore binary: $BORE_BIN"
     fi
 
     # ── Check 3: bore server reachable on ctrl port ──────────
     echo "[check 3/4] bore server ${BORE_HOST}:${BORE_CTRL_PORT} ..."
     if timeout 5 bash -c "echo >/dev/tcp/${BORE_HOST}/${BORE_CTRL_PORT}" 2>/dev/null; then
-      echo "  ✓ bore server reachable"
+      echo "   bore server reachable"
     else
-      echo "  ✗ bore server ${BORE_HOST}:${BORE_CTRL_PORT} unreachable"
+      echo "   bore server ${BORE_HOST}:${BORE_CTRL_PORT} unreachable"
       echo "  → Check if Fly.io machine is running: fly status -a pocket-lab-bore"
       FAILED=$((FAILED+1))
     fi
@@ -828,16 +828,16 @@ PORTFILE
 
     NEEDS_RESTART=false
     if [ -z "$BORE_PID" ]; then
-      echo "  ✗ bore process not running"
+      echo "   bore process not running"
       NEEDS_RESTART=true
     elif [ -z "$LIVE_PORT" ]; then
-      echo "  ✗ bore running (PID=${BORE_PID}) but no port detected — likely stale"
+      echo "   bore running (PID=${BORE_PID}) but no port detected — likely stale"
       NEEDS_RESTART=true
     else
       # TCP reachability check
       SAVED_HOST=$(grep '^host=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "$BORE_HOST")
       if timeout 5 bash -c "echo >/dev/tcp/${SAVED_HOST}/${LIVE_PORT}" 2>/dev/null; then
-        echo "  ✓ tunnel reachable at ${SAVED_HOST}:${LIVE_PORT}"
+        echo "   tunnel reachable at ${SAVED_HOST}:${LIVE_PORT}"
         # Sync port.txt if out of date
         SAVED_PORT=$(grep '^port=' "$REPO_DIR/bore-port.txt" 2>/dev/null | cut -d= -f2 || echo "")
         if [ "${SAVED_PORT}" != "$LIVE_PORT" ]; then
@@ -845,7 +845,7 @@ PORTFILE
           push_port "$LIVE_PORT" && FIXED=$((FIXED+1))
         fi
       else
-        echo "  ✗ bore running (PID=${BORE_PID}, port=${LIVE_PORT}) but TCP unreachable — stale connection"
+        echo "   bore running (PID=${BORE_PID}, port=${LIVE_PORT}) but TCP unreachable — stale connection"
         NEEDS_RESTART=true
       fi
     fi
@@ -897,19 +897,19 @@ PORTFILE
       if [ -n "${NEW_PORT:-}" ]; then
         printf '%s  ctrl=%-4s  remote=%-5s  host=%s  result=OK(diagnose)\n' \
           "$(date '+%Y-%m-%d %H:%M:%S')" "${BORE_CTRL_PORT:-?}" "${NEW_PORT}" "${BORE_HOST}" >> "${PORT_HISTORY}"
-        echo "  ✓ Tunnel restarted → ${BORE_HOST}:${NEW_PORT}"
+        echo "   Tunnel restarted → ${BORE_HOST}:${NEW_PORT}"
         echo "  → SSH: ssh -p ${NEW_PORT} $(whoami)@${BORE_HOST}"
         push_port "$NEW_PORT"
         FIXED=$((FIXED+1))
       else
-        echo "  ✗ Restart failed — check: bash $0 status"
+        echo "   Restart failed — check: bash $0 status"
         FAILED=$((FAILED+1))
       fi
     fi
 
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "[diagnose] fixed=${FIXED}  failed=${FAILED}"
-    [ "$FAILED" -eq 0 ] && echo "[diagnose] All checks passed ✓" || echo "[diagnose] Some issues need manual attention — see above"
+    [ "$FAILED" -eq 0 ] && echo "[diagnose] All checks passed " || echo "[diagnose] Some issues need manual attention — see above"
     ;;
 
   fs-bridge-start)  fs_bridge_start  ;;

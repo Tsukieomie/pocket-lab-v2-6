@@ -202,7 +202,7 @@ if [ "$TUNNEL_MODE" != "down" ] && [ -n "$LIVE_PORT" ]; then
     echo "[Bore] bore-port.txt out of sync (stored=$STORED_PORT) — pushing $LIVE_PORT..."
     bash "$TUNNEL_SH" sync-port 2>&1 || echo "[Bore] sync-port failed (non-fatal)"
   else
-    echo "[Bore] bore-port.txt in sync ✓ (port=$LIVE_PORT)"
+    echo "[Bore] bore-port.txt in sync  (port=$LIVE_PORT)"
   fi
 
 elif [ "$TUNNEL_MODE" != "down" ] && [ -z "$LIVE_PORT" ]; then

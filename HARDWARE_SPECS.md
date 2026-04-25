@@ -71,16 +71,16 @@
 
 | Component | Status |
 |-----------|--------|
-| amdgpu kernel driver | ✅ loaded, KFD node `renoir` visible |
-| `/dev/kfd` | ✅ present |
-| `/dev/dri/renderD128` | ✅ present |
-| ROCm 6.3 runtime | ✅ installed (`rocm-language-runtime`, `hip-runtime-amd`, `libhsa-runtime64-1`) |
-| rocminfo GPU detection | ✅ `AMD Radeon Graphics / Device Type: GPU / gfx900` |
-| HSA_OVERRIDE_GFX_VERSION | ✅ `9.0.0` — set in `/etc/environment` |
-| Ollama systemd GPU override | ✅ `/etc/systemd/system/ollama.service.d/gpu.conf` |
-| kenny in `render` group | ✅ added |
-| Ollama GPU offload (live) | ⚠️ **CPU-only until reboot** — VRAM too small (512 MB < model sizes) |
-| Ollama GPU offload (post-reboot) | ✅ Expected — dolphin (1.9 GB) fits in 2 GB VRAM |
+| amdgpu kernel driver |  loaded, KFD node `renoir` visible |
+| `/dev/kfd` |  present |
+| `/dev/dri/renderD128` |  present |
+| ROCm 6.3 runtime |  installed (`rocm-language-runtime`, `hip-runtime-amd`, `libhsa-runtime64-1`) |
+| rocminfo GPU detection |  `AMD Radeon Graphics / Device Type: GPU / gfx900` |
+| HSA_OVERRIDE_GFX_VERSION |  `9.0.0` — set in `/etc/environment` |
+| Ollama systemd GPU override |  `/etc/systemd/system/ollama.service.d/gpu.conf` |
+| kenny in `render` group |  added |
+| Ollama GPU offload (live) |  **CPU-only until reboot** — VRAM too small (512 MB < model sizes) |
+| Ollama GPU offload (post-reboot) |  Expected — dolphin (1.9 GB) fits in 2 GB VRAM |
 
 ### VRAM Expansion — Applied 2026-04-25
 
@@ -107,8 +107,8 @@ cat /sys/class/drm/card1/device/mem_info_vram_total
 
 | Model | Size | GPU fit (512 MB) | GPU fit (2 GB) |
 |-------|------|-------------------|-----------------|
-| `nchapman/dolphin3.0-qwen2.5:latest` | 1.9 GB | ❌ | ✅ |
-| `mistral:latest` | 4.4 GB | ❌ | ❌ (needs ≥4 GB) |
+| `nchapman/dolphin3.0-qwen2.5:latest` | 1.9 GB |  |  |
+| `mistral:latest` | 4.4 GB |  |  (needs ≥4 GB) |
 
 ### Renoir iGPU Notes
 

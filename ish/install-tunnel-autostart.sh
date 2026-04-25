@@ -66,7 +66,7 @@ else
   echo "" >> /etc/inittab
   echo "# Pocket Lab — bore tunnel auto-respawn" >> /etc/inittab
   echo "tun:respawn:$RESPAWN_SCRIPT" >> /etc/inittab
-  echo "  Added to /etc/inittab ✓"
+  echo "  Added to /etc/inittab "
   # Tell init to re-read inittab
   kill -HUP 1 2>/dev/null || true
 fi
@@ -86,7 +86,7 @@ if [ -f $RESPAWN_SCRIPT ]; then
   fi
 fi
 PROFILE
-  echo "  Added to /etc/profile ✓"
+  echo "  Added to /etc/profile "
 fi
 
 # ── 3. Start now ──────────────────────────────────────────

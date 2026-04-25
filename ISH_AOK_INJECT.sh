@@ -21,8 +21,8 @@
 set -e
 
 log() { echo "[AOK-INJECT] $*"; }
-ok()  { echo "[AOK-INJECT] ✓ $*"; }
-err() { echo "[AOK-INJECT] ✗ $*" >&2; }
+ok()  { echo "[AOK-INJECT]  $*"; }
+err() { echo "[AOK-INJECT]  $*" >&2; }
 
 log "=== iSH AOK Userspace Injection ==="
 

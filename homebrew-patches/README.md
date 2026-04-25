@@ -100,5 +100,5 @@ chroot /mnt/debian /bin/bash -c "
 
 ## Status
 
-- `brew --version` ✅ works
+- `brew --version`  works
 - `brew install hello` — pending tunnel recovery to confirm

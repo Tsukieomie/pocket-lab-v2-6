@@ -9,8 +9,8 @@ DIAG_LOG="${HOME}/.pocket-lab-diag.log"
 
 # ── helpers ───────────────────────────────────────────────
 GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
-ok()   { echo -e "${GREEN}  ✓ $*${NC}"; }
-fail() { echo -e "${RED}  ✗ $*${NC}"; }
+ok()   { echo -e "${GREEN}   $*${NC}"; }
+fail() { echo -e "${RED}   $*${NC}"; }
 warn() { echo -e "${YELLOW}  ! $*${NC}"; }
 
 # JSON log builder — accumulated in memory, flushed at end
