@@ -2,6 +2,8 @@
 
 GitHub-gated, signed-approval, Perplexity Computer SSH-integrated security lab bundle.
 
+> 🛰️ **"tunnel" = ngrok → fs-bridge on `:7779` (HTTP).** See [TUNNEL.md](TUNNEL.md) for the canonical reference. Bore + SSH is legacy.
+
 ---
 
 ## What's new in v2.8
