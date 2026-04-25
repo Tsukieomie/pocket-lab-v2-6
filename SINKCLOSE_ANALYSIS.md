@@ -216,3 +216,64 @@ SinkClose is documented here as a confirmed alternative path for the record.
 - AMD security bulletin: https://www.amd.com/en/resources/product-security/bulletin/amd-sb-7014.html
 - Platbox tooling: https://github.com/IOActive/Platbox
 - WIRED coverage: https://www.wired.com/story/amd-chip-sinkclose-flaw/
+
+---
+
+## Phase 5 Update: AmdApcbDxeV3 PSP Architecture (Deep Disassembly)
+
+### APCB Write-Back Uses PSP Proxy -- Not Direct FCH SPI BAR
+
+Full disassembly of AmdApcbDxeV3.pe32 (43,392 bytes) reveals:
+
+- FCH SPI BAR 0xFEC10000 is **not directly referenced** in this driver
+- All APCB write-backs route through: `AmdPspWriteBackApcbShadowCopy` -> `AmdPspFlashAccLibDxe` -> `gPspFlashAccSmmCommReadyProtocol` -> PSP C2P mailbox -> PSP ARM core -> SPI
+- PSP MMIO base set via MSR `0xC001100A` (PSPADDR) by `PspBarInitEarlyV2`
+- PSP validates write addresses against BIOS Directory Table -- APCB region is whitelisted, arbitrary regions are not
+
+### Two SPI Write Paths from SMM
+
+1. **PSP proxy path** (AGESA): gated by BDT whitelist, but APCB IS whitelisted
+2. **FCH SPI BAR direct path** (Platbox technique): bypasses PSP, only gated by `AltSPICS.SpiProtectLock`
+
+### Platbox SinkClose PoC Released
+
+Commit `2bc0d2b` on November 12, 2024 added:
+- `pocs/AmdSinkclose/sinkclose.cpp` (1,350 lines) -- full ring-0 to SMM exploit
+- `pocs/AmdSinkclose/sinkclose.s` (157 lines) -- 32-bit entry shellcode
+- Linux kernel driver updated in `PlatboxDrv/linux/driver/kernetix.c`
+
+### TClose Bit Location
+
+`TClose` = bit 3 of MSRC001_0113 (SMMMask). Setting it redirects SMRAM accesses to MMIO.
+
+From Platbox sinkclose.cpp:
+```c
+void set_tclose_for_core(UINT32 core_id) {
+    UINT64 tseg_mask = 0;
+    do_read_msr_for_core(core_id, AMD_MSR_SMM_TSEG_MASK, &tseg_mask);
+    tseg_mask = tseg_mask | (0b11 << 2);  // set TClose[3] and AClose[2]
+    do_write_msr_for_core(core_id, AMD_MSR_SMM_TSEG_MASK, tseg_mask);
+}
+```
+
+Core 1 cleanup (clear TClose, or triple-fault crashes system):
+```asm
+mov ecx, 0xc0010113
+rdmsr
+and eax, 0xfffffff3   ; clear TClose[3] and AClose[2]
+wrmsr
+```
+
+### SPI Lock Verification Required
+
+Critical open question: is `AltSPICS.SpiProtectLock` (FCH SPI BAR offset 0x1D, bit 5) set on X513IA?
+- If 0: FCH direct SPI write from SMM is possible (SPIRestrictedCmd can be cleared)
+- If 1: must use PSP proxy path (still works for APCB region)
+
+Verify by reading 0xFEC1001D from ring-0 (/dev/mem or Platbox).
+
+### ROM Armor
+
+NOT present on Renoir FP6 (Family 17h Model 60h). ROM Armor was introduced in later FCH generations (roughly Cezanne era). This platform uses the older SPIRestrictedCmd mechanism.
+
+See full analysis: `PSP_SPI_ARCHITECTURE.md`, `SINKCLOSE_EXPLOIT_CHAIN.md`
