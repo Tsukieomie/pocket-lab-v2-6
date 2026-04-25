@@ -83,6 +83,11 @@ MODEL_COLORS = {
     "gemini":   BLUE,
 }
 
+# ── Supermemory constants (used by _run_supermemory + helpers) ─
+# Defined here near the top so order-of-import never matters.
+SM_API   = "https://api.supermemory.ai/v3"
+SM_USER  = "pocket-lab-user"
+
 # ── Model registry ────────────────────────────────────────────
 MODELS = {
     "claude": {
@@ -232,199 +237,208 @@ class ModelResult:
         self.tokens   = {}
 
 
+# ── HTTP helper ──────────────────────────────────────────────
+# All five chat-completion-style providers share the same shape:
+#   POST <base>/<path>  Content-Type: application/json
+#   payload = {"model": ..., "messages": [...], "max_tokens": ...}
+#   response = {"choices": [{"message": {"content": ...}}], "usage": ...}
+#
+# Anthropic is the one outlier: top-level "system", body["content"][0]["text"],
+# different auth header. We pass shape-specific knobs as parameters.
+
+def _post_chat(
+    *,
+    url: str,
+    headers: dict,
+    payload: dict,
+    timeout: int,
+    extract_text,
+    extract_tokens=lambda d: d.get("usage", {}),
+):
+    """
+    POST a JSON payload and return (text, tokens, error).
+
+    On HTTPError the response body (truncated) is included in the error
+    string so 401/429/500 surface meaningful provider context instead of
+    the bare "HTTP Error 401: Unauthorized".
+    """
+    import urllib.request
+    import urllib.error
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+        return extract_text(data), extract_tokens(data), None
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", errors="replace")[:200]
+        except Exception:
+            pass
+        msg = f"HTTP {e.code}"
+        if body:
+            msg += f": {body}"
+        return "", {}, msg
+    except Exception as e:
+        return "", {}, str(e)
+
+
+def _build_messages(prompt: str, system: str) -> list:
+    """Standard OpenAI-style messages list with optional system turn."""
+    msgs = []
+    if system:
+        msgs.append({"role": "system", "content": system})
+    msgs.append({"role": "user", "content": prompt})
+    return msgs
+
+
+def _require_env(name: str, result: ModelResult) -> str:
+    """Get an env var or short-circuit the runner with an error."""
+    val = os.environ.get(name, "")
+    if not val:
+        result.error = f"{name} not set"
+    return val
+
+
 # ── Provider runners ─────────────────────────────────────────
 
 def _run_anthropic(prompt: str, model_id: str, system: str,
                    result: ModelResult, timeout: int):
-    try:
-        import urllib.request
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not key:
-            result.error = "ANTHROPIC_API_KEY not set"
-            return
-        payload = {
-            "model": model_id,
-            "max_tokens": 1024,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if system:
-            payload["system"] = system
-        url = _join_endpoint(_provider_base_url("anthropic"), "/v1/messages")
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "x-api-key": key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.load(resp)
-        result.text   = data["content"][0]["text"]
-        result.tokens = data.get("usage", {})
-    except Exception as e:
-        result.error = str(e)
+    key = _require_env("ANTHROPIC_API_KEY", result)
+    if not key:
+        return
+    payload = {
+        "model": model_id,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if system:
+        payload["system"] = system
+    text, tokens, err = _post_chat(
+        url=_join_endpoint(_provider_base_url("anthropic"), "/v1/messages"),
+        headers={
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        payload=payload,
+        timeout=timeout,
+        extract_text=lambda d: d["content"][0]["text"],
+    )
+    result.text, result.tokens, result.error = text, tokens, err
 
 
 def _run_openai(prompt: str, model_id: str, system: str,
                 result: ModelResult, timeout: int):
-    try:
-        import urllib.request
-        key = os.environ.get("OPENAI_API_KEY", "")
-        if not key:
-            result.error = "OPENAI_API_KEY not set"
-            return
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-        payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
-        url = _join_endpoint(_provider_base_url("openai"), "/v1/chat/completions")
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.load(resp)
-        result.text   = data["choices"][0]["message"]["content"]
-        result.tokens = data.get("usage", {})
-    except Exception as e:
-        result.error = str(e)
+    key = _require_env("OPENAI_API_KEY", result)
+    if not key:
+        return
+    text, tokens, err = _post_chat(
+        url=_join_endpoint(_provider_base_url("openai"), "/v1/chat/completions"),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        payload={"model": model_id, "messages": _build_messages(prompt, system),
+                 "max_tokens": 1024},
+        timeout=timeout,
+        extract_text=lambda d: d["choices"][0]["message"]["content"],
+    )
+    result.text, result.tokens, result.error = text, tokens, err
 
 
 def _run_perplexity(prompt: str, model_id: str, system: str,
                     result: ModelResult, timeout: int):
-    try:
-        import urllib.request
-        key = os.environ.get("PERPLEXITY_API_KEY", "")
-        if not key:
-            result.error = "PERPLEXITY_API_KEY not set"
-            return
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-        payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
-        url = _join_endpoint(_provider_base_url("perplexity"), "/chat/completions")
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.load(resp)
-        result.text   = data["choices"][0]["message"]["content"]
-        result.tokens = data.get("usage", {})
-    except Exception as e:
-        result.error = str(e)
+    key = _require_env("PERPLEXITY_API_KEY", result)
+    if not key:
+        return
+    text, tokens, err = _post_chat(
+        url=_join_endpoint(_provider_base_url("perplexity"), "/chat/completions"),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        payload={"model": model_id, "messages": _build_messages(prompt, system),
+                 "max_tokens": 1024},
+        timeout=timeout,
+        extract_text=lambda d: d["choices"][0]["message"]["content"],
+    )
+    result.text, result.tokens, result.error = text, tokens, err
 
 
 def _run_supermemory(prompt: str, model_id: str, system: str,
                      result: ModelResult, timeout: int):
     """Route through Supermemory Memory Router → OpenRouter free models."""
-    try:
-        import urllib.request
-        sm_key = os.environ.get("SUPERMEMORY_API_KEY", "")
-        if not sm_key:
-            result.error = "SUPERMEMORY_API_KEY not set"
-            return
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-        payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
-        # Supermemory Memory Router proxies to OpenRouter
-        # Provider key = empty string (OpenRouter free tier requires no key for free models)
-        req = urllib.request.Request(
-            "https://api.supermemory.ai/v3/https://openrouter.ai/api/v1/chat/completions",
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": "Bearer free",
-                "Content-Type": "application/json",
-                "x-supermemory-api-key": sm_key,
-                "x-sm-user-id": SM_USER,
-                "x-sm-conversation-id": "pocket-lab",
-                "HTTP-Referer": "https://github.com/Tsukieomie/pocket-lab-v2-6",
-                "X-Title": "Pocket Lab Parallel AI",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.load(resp)
-        result.text   = data["choices"][0]["message"]["content"]
-        result.tokens = data.get("usage", {})
-    except Exception as e:
-        result.error = str(e)
+    sm_key = _require_env("SUPERMEMORY_API_KEY", result)
+    if not sm_key:
+        return
+    # Supermemory Memory Router proxies to OpenRouter; the OpenRouter
+    # bearer can be overridden via SM_OPENROUTER_KEY for paid models.
+    or_bearer = os.environ.get("SM_OPENROUTER_KEY", "free")
+    text, tokens, err = _post_chat(
+        url="https://api.supermemory.ai/v3/https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {or_bearer}",
+            "Content-Type": "application/json",
+            "x-supermemory-api-key": sm_key,
+            "x-sm-user-id": SM_USER,
+            "x-sm-conversation-id": "pocket-lab",
+            "HTTP-Referer": "https://github.com/Tsukieomie/pocket-lab-v2-6",
+            "X-Title": "Pocket Lab Parallel AI",
+        },
+        payload={"model": model_id, "messages": _build_messages(prompt, system),
+                 "max_tokens": 1024},
+        timeout=timeout,
+        extract_text=lambda d: d["choices"][0]["message"]["content"],
+    )
+    result.text, result.tokens, result.error = text, tokens, err
 
 
 def _run_openrouter(prompt: str, model_id: str, system: str,
                     result: ModelResult, timeout: int):
     """Call OpenRouter free-tier models — requires OPENROUTER_API_KEY."""
-    try:
-        import urllib.request
-        key = os.environ.get("OPENROUTER_API_KEY", "")
-        if not key:
-            result.error = "OPENROUTER_API_KEY not set"
-            return
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-        payload = {"model": model_id, "messages": messages, "max_tokens": 1024}
-        url = _join_endpoint(_provider_base_url("openrouter"), "/chat/completions")
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/Tsukieomie/pocket-lab-v2-6",
-                "X-Title": "Pocket Lab Parallel AI",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.load(resp)
-        result.text   = data["choices"][0]["message"]["content"]
-        result.tokens = data.get("usage", {})
-    except Exception as e:
-        result.error = str(e)
+    key = _require_env("OPENROUTER_API_KEY", result)
+    if not key:
+        return
+    text, tokens, err = _post_chat(
+        url=_join_endpoint(_provider_base_url("openrouter"), "/chat/completions"),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/Tsukieomie/pocket-lab-v2-6",
+            "X-Title": "Pocket Lab Parallel AI",
+        },
+        payload={"model": model_id, "messages": _build_messages(prompt, system),
+                 "max_tokens": 1024},
+        timeout=timeout,
+        extract_text=lambda d: d["choices"][0]["message"]["content"],
+    )
+    result.text, result.tokens, result.error = text, tokens, err
 
 
 def _run_ollama(prompt: str, model_id: str, system: str,
                 result: ModelResult, timeout: int):
-    try:
-        import urllib.request
-        url = _join_endpoint(_provider_base_url("ollama"), "/api/generate")
-        payload = {
-            "model": model_id,
-            "prompt": prompt,
-            "stream": False,
-        }
-        if system:
-            payload["system"] = system
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.load(resp)
-        result.text = data.get("response", "")
-    except Exception as e:
-        result.error = str(e)
+    payload = {
+        "model":  model_id,
+        "prompt": prompt,
+        "stream": False,
+    }
+    if system:
+        payload["system"] = system
+    text, tokens, err = _post_chat(
+        url=_join_endpoint(_provider_base_url("ollama"), "/api/generate"),
+        headers={"Content-Type": "application/json"},
+        payload=payload,
+        timeout=timeout,
+        extract_text=lambda d: d.get("response", ""),
+        extract_tokens=lambda d: {},  # Ollama has no usage block
+    )
+    result.text, result.tokens, result.error = text, tokens, err
 
 
 _RUNNERS = {
@@ -471,7 +485,8 @@ def dolphin_compress(prompt: str, timeout: int = 60) -> str:
         compressed = data.get("response", "").strip()
         if compressed:
             saving = round((1 - len(compressed) / len(prompt)) * 100)
-            print(f"{DIM}[dolphin-compress] {len(prompt)} → {len(compressed)} chars ({saving}% reduction){RESET}")
+            label = f"{saving}% reduction" if saving > 0 else f"{-saving}% growth"
+            print(f"{DIM}[dolphin-compress] {len(prompt)} → {len(compressed)} chars ({label}){RESET}")
             return compressed
     except Exception as e:
         print(f"{DIM}[dolphin-compress] skipped: {e}{RESET}")
@@ -567,8 +582,10 @@ def print_results(results: list, prompt: str):
         width = 80
     sep   = "─" * width
 
+    title  = f"  PARALLEL AI — {len(results)} model(s)  │  {datetime.now().strftime('%H:%M:%S')}"
+    inner  = title.ljust(width - 2)[:width - 2]
     print(f"\n{BOLD}╔{'═'*(width-2)}╗{RESET}")
-    print(f"{BOLD}║  PARALLEL AI — {len(results)} model(s)  │  {datetime.now().strftime('%H:%M:%S')}{' '*(width-48)}║{RESET}")
+    print(f"{BOLD}║{inner}║{RESET}")
     print(f"{BOLD}╚{'═'*(width-2)}╝{RESET}")
     print(f"{DIM}Prompt: {prompt[:120]}{'...' if len(prompt)>120 else ''}{RESET}\n")
 
@@ -611,23 +628,12 @@ def print_json(results: list, prompt: str):
 
 
 # ── Supermemory integration ──────────────────────────────────
-
-SM_API   = "https://api.supermemory.ai/v3"
-SM_USER  = "pocket-lab-user"
+# Constants SM_API and SM_USER are defined at the top of the module
+# alongside other module-level constants.
 
 def _sm_key() -> str:
-    """Resolve SUPERMEMORY_API_KEY from env or ~/.mem0_env file."""
-    key = os.environ.get("SUPERMEMORY_API_KEY", "")
-    if not key:
-        for env_file in ["/root/.mem0_env", os.path.expanduser("~/.mem0_env")]:
-            if os.path.exists(env_file):
-                for line in open(env_file).read().splitlines():
-                    if line.startswith("SUPERMEMORY_API_KEY="):
-                        key = line.split("=", 1)[1].strip()
-                        break
-            if key:
-                break
-    return key
+    """Resolve SUPERMEMORY_API_KEY — _load_mem0_env() handles the file."""
+    return os.environ.get("SUPERMEMORY_API_KEY", "")
 
 
 def supermemory_fetch_context(prompt: str) -> str:
