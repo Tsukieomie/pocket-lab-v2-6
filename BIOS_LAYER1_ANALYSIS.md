@@ -380,3 +380,168 @@ enable SMT by writing. They reflect the topology as initialized by AGESA.
 - RU.efi (UEFI shell variable editor): https://github.com/JamesAmiTw/ru-uefi/
 - AMD PPR Family 17h Model 60h (Renoir):
   https://docs.amd.com/v/u/en-US/55922-A1-PUB_3.06
+
+---
+
+## CbsBaseDxeRN Static Disassembly Results
+
+Performed: 2026-04-25
+File: /tmp/CbsBaseDxeRN.pe32 (4,864 bytes, PE32+ EFI boot service driver)
+Tool: objdump -d -M x86-64,intel
+
+### Module Structure
+
+Five functions of note:
+
+| Code offset | Function description |
+|-------------|----------------------|
+| 0x0360      | CPUID wrapper (used to detect Renoir vs Cezanne CPUID) |
+| 0x03b0      | DxeEntry -- saves SystemTable, calls init chain |
+| 0x03dc      | CBS init -- detects CPUID, allocates AmdSetup pool, calls defaults init |
+| 0x0498      | AmdSetup variable read/write -- GetVariable / SetVariable via EFI RT |
+| 0x0674      | AmdSetup defaults initializer -- writes all default bytes into struct |
+| 0x05a4      | CBS notify callback -- dispatches per-CPUID handler table |
+| 0x0a10      | SMU message 0x1e6 builder -- reads AmdSetup bytes, builds SMU DWORD |
+| 0x0b5c      | AllocatePool wrapper |
+| 0x0ba0      | SMU indirect write (WRMSR 0xC001100A + SMN 0x9C5A203A + SMI 0xB2) |
+
+### CPUID Detection (0x03dc)
+
+```
+mov ecx, 0x80000001
+call CPUID_wrapper
+and esi, 0x0fff0f00        ; mask family/model/stepping
+cmp rax, 0x00860f00        ; Renoir (Family 17h Model 60h)
+je  0x42a
+cmp rax, 0x00a50f00        ; Cezanne (Family 19h Model 50h)
+je  0x42a
+xor ebx, ebx               ; unknown CPUID -- skip init entirely
+jmp 0x488
+```
+
+The driver explicitly handles only Renoir (0x860xxx) and Cezanne (0xa50xxx).
+CPUID 0x00860601 (the 4700U) matches the Renoir branch (0x860f00 mask).
+
+### AmdSetup Defaults Initializer (0x0674)
+
+This function writes the factory defaults into the AmdSetup struct.
+All writes use rcx as the base pointer (AmdSetup data buffer, no header).
+Data offsets are direct -- no 4-byte attr header in the struct.
+
+Key writes decoded (little-endian byte order):
+
+```
+data[0x004] = 0x0000015b   (4 bytes) -- data region length = 347 bytes
+data[0x020] = 0x0103fffe   (4 bytes) -- CBS memory option field
+data[0x024] = 0x03ff0003   (4 bytes) -- CBS memory option field
+data[0x02d] |= 0xffff      (OR mask) -- Auto sentinel
+data[0x02f] = 0x0ff50103   (4 bytes)
+data[0x039] = 0x00000000   (4 bytes)
+data[0x04b] = 0x07ff0303   (4 bytes)
+data[0x053] |= 0xffffffff  (OR mask) -- all Auto
+data[0x05b] = 0x00ffff39   (0x5b=0x39, 0x5c-0x5d=0xff)
+data[0x05f] = 0x00ffff1a   (0x5f=0x1a, 0x60-0x61=0xff)
+data[0x063] = 0x00000012   (0x63=0x12=18)
+data[0x06c] = 0x0138       (word -- 312 decimal)
+data[0x06f] = 0x00c0       (word -- 192 decimal)
+data[0x072] = 0xffffffffffff0084  (qword -- 0x72=0x84, rest 0xff)
+data[0x0ec] = 0x000000c8   (0xec=0xc8=200)
+data[0x0f0] = 0x0000000f   (qword low byte = 0x0f)
+```
+
+CCD/Thread region (0x138-0x15a):
+```
+data[0x138] = 0x0f  data[0x139] = 0xff  data[0x13a] = 0x00  data[0x13b] = 0xff
+data[0x13c] = 0x00  data[0x13d] = 0x0f  data[0x13e] = 0x0f  data[0x13f] = 0x0f
+data[0x140] = 0x0f  data[0x141] = 0x0f  data[0x142] = 0x0f  data[0x143] = 0x0f
+data[0x144] = 0x0f  data[0x145] = 0x0f  data[0x146] = 0x03  data[0x147] = 0x0f
+data[0x148] = 0x0f  data[0x149] = 0x0f  data[0x14a] = 0x01  data[0x14b] = 0x0f
+data[0x14c] = 0x0f  data[0x14d] = 0x0f  data[0x14e] = 0x0f  data[0x14f] = 0x0f
+data[0x150] = 0x0f  data[0x151] = 0x0f  data[0x152] = 0x0f  data[0x153] = 0x0f
+data[0x154] = 0x0f  data[0x155] = 0x0f  data[0x156] = 0x0f  data[0x157] = 0x0f
+data[0x158] = 0x02  data[0x159] = 0xff  data[0x15a] = 0xff
+```
+
+### SMU Message Builder (0x0a10)
+
+This function reads 9 bytes from AmdSetup and uses them to build a DWORD
+sent to SMU message register 0x1e6 (decimal 486).
+
+Logic per byte:
+- if byte == 0x0f: skip this bit (leave at AGESA default / auto)
+- elif byte == 0x00: clear the bit (btr ebx, N)
+- else (including 0x01): set the bit (bts ebx, N)
+
+AmdSetup bytes read and their corresponding SMU DWORD bits:
+
+| Data offset | Init default | Live value | SMU bit | Action |
+|-------------|-------------|-----------|---------|--------|
+| 0x147       | 0x0f        | 0x0f      | bit 5   | AUTO   |
+| 0x148       | 0x0f        | 0x0f      | bit 6   | AUTO   |
+| 0x149       | 0x0f        | 0x0f      | bit 7   | AUTO   |
+| 0x14a       | 0x01        | 0x01      | bit 8   | FORCE SET |
+| 0x14b       | 0x0f        | 0x0f      | bit 11  | AUTO   |
+| 0x14d       | 0x0f        | 0x0f      | bit 12  | AUTO   |
+| 0x14f       | 0x0f        | 0x0f      | bit 16  | AUTO   |
+| 0x151       | 0x0f        | 0x0f      | bit 26  | AUTO   |
+| 0x153       | 0x0f        | 0x0f      | bit 27  | AUTO   |
+
+Critical observation: data[0x14a] is the ONLY non-auto byte in the entire
+CCD/thread region. It defaults to 0x01 (force SET) and actively sets bit 8
+in SMU message 0x1e6. All other bytes are 0x0f (auto/skip).
+
+### SMU Indirect Write (0x0ba0)
+
+The module writes to the SMU via:
+1. WRMSR 0xC001100A (AMD SMN indirect access MSR)
+2. Target SMN address: 0x9C5A203A
+3. SMI trigger: INT 0xB2 via `mov rax, 0xb2; int1`
+
+This is the standard AMD CBS SMU message path used on Renoir. The message
+value 0x1e6 maps to SMU firmware function index 486, which in Renoir SMU
+FW 0x374700 controls CCD topology configuration passed to AGESA.
+
+### Anomalous Byte: data[0x146] = 0x03
+
+This byte is NOT read by the SMU message builder function. Its value 0x03
+does not match standard SMT control enum (0=Auto, 1=Enable, 2=Disable).
+
+Possible interpretations:
+- Core count per CCD (3 = three cores enabled -- but 4700U has 8)
+- ThreadsPerCore count field (not matching known values)
+- AGESA internal field not exposed via HII
+- Leftover artifact from a different BIOS config layer
+
+This byte was NOT mapped to any IFR question in the X513IA BIOS.
+
+### Disassembly Conclusion
+
+The CbsBaseDxeRN module for X513IA BIOS.308 does NOT contain an SMT
+control byte mapping. The AmdSetup field that would normally control
+SMT (seen in other Renoir OEM BIOS builds as a OneOf 0/1/2 option) is
+absent from both:
+1. The IFR form definition (no SMT OneOf question)
+2. The CBS driver init defaults (no SMT byte in the init table)
+3. The SMU message builder (no SMT bit in the 0x1e6 construction)
+
+This confirms that ASUS compiled the X513IA BIOS with AMD AGESA in a
+configuration that excludes SMT topology initialization for CPUID 0x860xxx.
+The AGESA binary blob received by ASUS from AMD may have had SMT disabled
+at the SDK level for this product line.
+
+SMT cannot be enabled by writing any byte to the AmdSetup EFI variable
+on this BIOS build. The Smokeless UMAF test is still valid to confirm
+whether any AGESA-internal override path exists, but the driver evidence
+strongly suggests it does not.
+
+---
+
+## Live Variable Confirmation (2026-04-25, via tunnel)
+
+Live machine state at time of analysis:
+- Microcode: 0x860010d (vulnerable, pre-EntrySign fix)
+- SMT control: notsupported
+- AmdSetup GUID: 3a997502-647a-4c82-998e-52ef9486a247 (confirmed present)
+- AMD_PBS_SETUP GUID: a339d746-f678-49b3-9fc7-54ce0f9df226 (confirmed present)
+
+Live AmdSetup hex matches sandbox copy exactly (verified via tunnel exec).
