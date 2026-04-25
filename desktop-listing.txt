@@ -1,0 +1,12 @@
+total 60
+drwxr-xr-x  7 kenny kenny  4096 Apr 25 01:34 .
+drwxr-x--- 64 kenny kenny  4096 Apr 25 02:12 ..
+drwxrwxr-x  3 kenny kenny  4096 Apr  9 15:40 .sixth
+-rwxrwxr-x  1 kenny kenny   348 Apr 23 12:40 BitComet.desktop
+-rwxrwxr-x  1 kenny kenny   594 Apr 24 12:58 Perplexity Comet.desktop
+-rwxr-xr-x  1 kenny kenny   289 Apr 24 12:58 Perplexity Connect.desktop
+drwxrwxr-x  7 kenny kenny  4096 Apr 22 17:52 Projects
+drwxrwxr-x  2 kenny kenny  4096 Apr 23 02:16 Smart Torture - Investigation
+drwxrwxr-x  4 kenny kenny  4096 Apr 23 02:09 Tools
+drwxrwxr-x  3 kenny kenny  4096 Apr 22 18:11 Workspace
+-rw-rw-r--  1 kenny kenny 17882 Apr 25 01:34 project_info__1.md
