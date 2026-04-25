@@ -155,7 +155,12 @@ BORE_ENV="${HOME}/.bore_env"
 BORE_PORT_FILE="$WORK/bore-port.txt"
 TUNNEL_SH="$WORK/linux/tunnel.sh"
 
-_bore_host() { grep '^BORE_HOST=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 || echo "bore.pub"; }
+_bore_host() {
+  # Prefer ~/.bore_env, then bore-port.txt, then bore.pub
+  grep '^BORE_HOST=' "$BORE_ENV" 2>/dev/null | cut -d= -f2 | grep -v '^$' \
+    || grep '^host=' "$BORE_PORT_FILE" 2>/dev/null | cut -d= -f2 | grep -v '^$' \
+    || echo "bore.pub"
+}
 
 # ── Auto-install bore if missing ─────────────────────────
 if ! command -v bore >/dev/null 2>&1 && [ ! -x "${HOME}/.local/bin/bore" ]; then
@@ -175,6 +180,17 @@ _systemd_live_port() {
     | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 || echo ""
 }
 
+# Read port from the log tunnel.sh writes (strips ANSI colour codes)
+_log_live_port() {
+  sed 's/\x1b\[[0-9;]*m//g' /tmp/bore-tunnel.log 2>/dev/null \
+    | grep -oE 'listening at [^:]+:[0-9]+' | tail -1 | grep -oE '[0-9]+$' || echo ""
+}
+
+# Read port from bore-port.txt (written by tunnel.sh push_port)
+_portfile_port() {
+  grep '^port=' "$BORE_PORT_FILE" 2>/dev/null | cut -d= -f2 || echo ""
+}
+
 TUNNEL_MODE="down"
 LIVE_PORT=""
 
@@ -182,11 +198,21 @@ if _has_systemd && systemctl --user is-active --quiet bore-tunnel.service 2>/dev
   TUNNEL_MODE="systemd"
   LIVE_PORT=$(_systemd_live_port)
   echo "[Bore] Managed by systemd (bore-tunnel.service)"
-elif pgrep -f 'bore local 22' >/dev/null 2>&1; then
+elif pgrep -f 'bore.*local.*22' >/dev/null 2>&1; then
+  # Process is live — get port from log (tunnel.sh writes to /tmp/bore-tunnel.log)
   TUNNEL_MODE="manual"
-  LIVE_PORT=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/bore-tunnel-linux.log 2>/dev/null \
-    | grep -oE 'remote_port=[0-9]+' | tail -1 | cut -d= -f2 || echo "")
-  echo "[Bore] Tunnel running (manual)"
+  LIVE_PORT=$(_log_live_port)
+  echo "[Bore] Tunnel running (managed by tunnel.sh)"
+elif [ -n "$(_portfile_port)" ] && [ -f /tmp/bore-tunnel.log ]; then
+  # No live process but bore-port.txt + log exist — tunnel was managed by tunnel.sh
+  # Verify the log confirms a successful connection
+  if sed 's/\x1b\[[0-9;]*m//g' /tmp/bore-tunnel.log 2>/dev/null | grep -q 'listening at'; then
+    TUNNEL_MODE="portfile"
+    LIVE_PORT=$(_portfile_port)
+    echo "[Bore] Tunnel managed by tunnel.sh (detected via bore-port.txt + log)"
+  else
+    echo "[Bore] Tunnel is DOWN"
+  fi
 else
   echo "[Bore] Tunnel is DOWN"
 fi
