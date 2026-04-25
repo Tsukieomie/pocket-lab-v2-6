@@ -122,19 +122,24 @@ returned a definitive result:
 - Ryzen 7 4800U: 8 cores / 16 threads (SMT enabled, 12 nm, Renoir)
 - Ryzen 7 4700U: 8 cores / 8 threads (no SMT, same die family)
 
-The 4700U and 4800U are NOT the same silicon with fuses burned. AMD uses
-hardware binning: the 4700U die has fewer active thread-execution resources
-per core. This is a silicon-level difference, not a firmware lock. Microcode
-cannot enable SMT on this device because the physical execution units do not
-exist.
+The 4700U and 4800U share the SAME physical die (156 mm2, 9,800M transistors,
+7nm TSMC). The SMT execution hardware exists on the 4700U silicon.
+The disable is applied by AGESA firmware during POST: secondary thread contexts
+are never initialized, no APIC IDs are allocated for them, and they remain
+clock-gated. This is NOT a laser fuse difference.
+
+See SMT_INVESTIGATION.md for full silicon-level evidence including raw CPUID
+leaf dumps, MSR readings, and APIC ID analysis confirming the firmware theory.
 
 Community investigation (Reddit, ElevenForum) confirms: no known successful
 SMT unlock on any Ryzen 4000 mobile part. The "SMT unlock via microcode"
 possibility applies only to chips where AMD disabled existing SMT hardware
 via fuse/firmware -- which does not apply to the 4700U.
 
-Conclusion: SMT unlock on the 4700U via EntrySign microcode is NOT POSSIBLE.
-The hardware limitation is physical.
+Conclusion: Runtime SMT unlock via EntrySign microcode is NOT POSSIBLE in the
+current boot session. The hardware exists but secondary thread contexts are
+never initialized by firmware. A custom coreboot/AGESA build with SMT enabled
+is the only viable path. See SMT_INVESTIGATION.md for full analysis.
 
 ---
 
