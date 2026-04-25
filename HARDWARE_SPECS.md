@@ -1,6 +1,6 @@
 # Hardware Specs — kenny-VivoBook-ASUSLaptop-X513IA-M513IA
 
-> Last updated: 2026-04-25T09:20 UTC  
+> Last updated: 2026-04-25T10:56 UTC  
 > Gathered via fs-bridge exec over ngrok tunnel
 
 ---
@@ -34,11 +34,10 @@
 | Property | Value |
 |----------|-------|
 | Total RAM | 16 GB |
-| Used | 4.2 GB |
-| Free | 425 MB |
-| Buff/cache | 10 GB |
+| Used | ~4.2 GB |
+| Buff/cache | ~10 GB |
 | Available | ~10 GB |
-| Swap | 7.8 GB (zram — compressed in-memory swap) |
+| Swap | 7.8 GB (zram lz4 — compressed in-memory swap) |
 
 ---
 
@@ -55,14 +54,69 @@
 
 ---
 
-## GPU
+## GPU — Ryzen 7 4700U iGPU (Renoir / Vega)
 
 | Property | Value |
 |----------|-------|
-| Model | AMD Radeon Vega (Renoir integrated) |
+| Model | AMD Radeon Vega (Renoir integrated) — `gfx90c` |
+| ROCm name | `gfx900` (via HSA_OVERRIDE_GFX_VERSION=9.0.0) |
 | PCI ID | 03:00.0 |
-| Type | Integrated iGPU (shares system RAM) |
+| Type | Integrated iGPU — UMA (shares system RAM) |
+| VRAM (current) | **512 MB** — BIOS default UMA carve-out |
+| VRAM (after reboot) | **2048 MB** — modprobe config applied 2026-04-25 |
+| GTT (GPU-accessible system RAM) | 8 GB |
 | HDMI/DP Audio | AMD/ATI Renoir HDMI/DP Audio Controller (03:00.1) |
+
+### GPU Software Stack (as of 2026-04-25)
+
+| Component | Status |
+|-----------|--------|
+| amdgpu kernel driver | ✅ loaded, KFD node `renoir` visible |
+| `/dev/kfd` | ✅ present |
+| `/dev/dri/renderD128` | ✅ present |
+| ROCm 6.3 runtime | ✅ installed (`rocm-language-runtime`, `hip-runtime-amd`, `libhsa-runtime64-1`) |
+| rocminfo GPU detection | ✅ `AMD Radeon Graphics / Device Type: GPU / gfx900` |
+| HSA_OVERRIDE_GFX_VERSION | ✅ `9.0.0` — set in `/etc/environment` |
+| Ollama systemd GPU override | ✅ `/etc/systemd/system/ollama.service.d/gpu.conf` |
+| kenny in `render` group | ✅ added |
+| Ollama GPU offload (live) | ⚠️ **CPU-only until reboot** — VRAM too small (512 MB < model sizes) |
+| Ollama GPU offload (post-reboot) | ✅ Expected — dolphin (1.9 GB) fits in 2 GB VRAM |
+
+### VRAM Expansion — Applied 2026-04-25
+
+The iGPU UMA frame buffer was expanded from 512 MB → 2 GB via:
+
+```
+/etc/modprobe.d/amdgpu-vram.conf:
+  options amdgpu vramlimit=2048
+  options amdgpu gttsize=4096
+```
+
+- `iomem=relaxed` added to `GRUB_CMDLINE_LINUX_DEFAULT`
+- initramfs rebuilt (`update-initramfs -u -k all`)
+- GRUB updated (`update-grub`)
+- **Takes effect on next reboot**
+
+Post-reboot verify:
+```sh
+cat /sys/class/drm/card1/device/mem_info_vram_total
+# Expected: 2147483648 (2 GB)
+```
+
+### Ollama Local Models
+
+| Model | Size | GPU fit (512 MB) | GPU fit (2 GB) |
+|-------|------|-------------------|-----------------|
+| `nchapman/dolphin3.0-qwen2.5:latest` | 1.9 GB | ❌ | ✅ |
+| `mistral:latest` | 4.4 GB | ❌ | ❌ (needs ≥4 GB) |
+
+### Renoir iGPU Notes
+
+- Renoir is `gfx90c` — **not on ROCm's official support list** but works with `HSA_OVERRIDE_GFX_VERSION=9.0.0`
+- ROCm 6.3 `noble` repo is the correct one for Ubuntu 26.04 (6.1 noble does not exist)
+- Ubuntu 26.04 ships its own `rocminfo 7.1.1` which conflicts with ROCm's version — install `rocm-language-runtime hip-runtime-amd libhsa-runtime64-1` individually, not `rocm-hip-runtime` meta-package
+- ryzenadj requires `iomem=relaxed` kernel param — added to GRUB, takes effect on reboot
+- Secure Boot: **disabled** — no signing required for custom module params
 
 ---
 
@@ -116,11 +170,23 @@
 
 ---
 
+## Session Log — 2026-04-25
+
+- Cloned `pocket-lab-v2-6` repo fresh, pulled 11 commits from origin
+- Established ngrok → fs-bridge tunnel (port 7779), token rotated
+- Diagnosed Ollama running 100% CPU — root cause: no ROCm, 512 MB VRAM
+- Installed ROCm 6.3 runtime (fixed noble repo + package conflict)
+- Applied HSA_OVERRIDE_GFX_VERSION=9.0.0 for Renoir gfx90c
+- Configured Ollama systemd GPU override
+- Expanded VRAM to 2 GB via amdgpu modprobe config + GRUB + initramfs rebuild
+- **Pending reboot** to activate 2 GB VRAM and enable dolphin GPU offload
+
+---
+
 ## Observations & Notes
 
-- **Battery degradation:** At 68.4% health (28.8 Wh vs 42.1 Wh design), the battery has lost ~13 Wh of capacity. Recommend keeping plugged in for sustained workloads.
-- **SMT disabled:** Simultaneous multithreading is off — 8 physical cores, 1 thread each. This is a deliberate security hardening choice (mitigates Spectre RSB overflow). Re-enabling would double thread count for parallelism at a minor security cost.
-- **Plenty of disk space:** 740 GB free — no concerns.
-- **zram swap:** 7.8 GB compressed in-memory swap is active, good for a 16 GB RAM system.
-- **NVMe QLC drive:** Intel 660P uses QLC NAND — fine for general use but sustained write speeds drop under heavy load.
-- **Ubuntu 26.04 + kernel 7.0:** Very current stack, released April 2026.
+- **Battery degradation:** At 68.4% health (28.8 Wh vs 42.1 Wh design). Keep plugged in for sustained AI workloads.
+- **SMT disabled:** Deliberate security hardening. Re-enabling (`echo on > /sys/devices/system/cpu/smt/control`) doubles thread count for inference at minor security cost.
+- **ROCm + Renoir:** Fully working once VRAM ≥ model size. Dolphin (1.9 GB) will GPU-offload after reboot. Mistral (4.4 GB) remains CPU-only unless a smaller quantized variant is pulled.
+- **NVMe QLC:** Intel 660P sustained write speeds degrade under heavy load — avoid model training on this drive.
+- **GTT fallback:** Even without BIOS VRAM change, amdgpu can use up to 8 GB of system RAM as GTT for GPU ops — but Ollama's layer offload requires dedicated VRAM, not GTT.
