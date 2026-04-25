@@ -18,6 +18,7 @@ tunnel from the Alpine host shell.
 | `bore-tunnel-respawn.sh` | Original respawn loop used by inittab-based auto-start |
 | `install-tunnel-autostart.sh` | One-time installer wiring the respawn loop into `/etc/inittab` + `/etc/profile` |
 | `inittab-tunnel.fragment`, `profile-tunnel.fragment` | Reference snippets installed by `install-tunnel-autostart.sh` |
+| `setup-write-bridge.sh` | Discovers the iSH app-group container under `/mnt/ios/.../AppGroup/<UUID>` and creates a writable `PocketLabWriteBridge/{inbox,outbox,logs}` tree plus `/root/ios-write` and `<repo>/ios-write` symlinks. See [`../WRITE_BRIDGE.md`](../WRITE_BRIDGE.md). |
 
 The `pocket-*` scripts are POSIX `sh`. They are designed for iSH/BusyBox and
 account for limitations such as `netstat` not exposing the listener PID.
@@ -166,6 +167,24 @@ sed -i '/bore-tunnel-respawn/d' /etc/inittab
 # Remove the profile block (3 lines starting with "Pocket Lab: auto-start")
 pkill -f bore-tunnel-respawn
 ```
+
+## Writable iOS Bridge
+
+`/mnt/ios/private/var/{tmp,mobile/...}` paths often appear writable but
+return `Operation not permitted` on real writes due to iOS sandboxing.
+The iSH app-group container under
+`/mnt/ios/private/var/mobile/Containers/Shared/AppGroup/<UUID>` is the
+path that actually accepts writes. Run:
+
+```sh
+sh ish/setup-write-bridge.sh
+```
+
+to discover that path (the `<UUID>` is device-specific — never hard-code
+it), create `PocketLabWriteBridge/{inbox,outbox,logs}` inside it, and
+link it as `/root/ios-write` and `<repo>/ios-write`. Use those for any
+output that should be visible to iOS / Files / other apps. Full notes:
+[`../WRITE_BRIDGE.md`](../WRITE_BRIDGE.md).
 
 ## One-Shot Dropbear + bore (port 2225)
 

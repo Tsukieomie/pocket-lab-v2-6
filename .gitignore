@@ -2,6 +2,14 @@
 bore-port.txt
 pocket-current-ssh
 
+# iSH write bridge — runtime symlink and any device-specific bridge state
+# that may end up in the working tree. The bridge itself lives inside the
+# iSH app-group container (UUID is device-specific) and must never be
+# committed.
+ios-write
+**/PocketLabWriteBridge/
+.write-test-*
+
 # Logs
 *.log
 
