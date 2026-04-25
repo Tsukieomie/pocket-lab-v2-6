@@ -1,5 +1,5 @@
-host=none
-ssh=none
-updated=never
-machine=none
-tunnel=none
+host=ethnic-assurance-excel-nursery.trycloudflare.com
+ssh=ssh -o ProxyCommand="cloudflared access tcp --hostname https://ethnic-assurance-excel-nursery.trycloudflare.com" kenny@localhost
+updated=2026-04-25T08:49:39Z
+machine=kenny-VivoBook
+tunnel=cloudflared
