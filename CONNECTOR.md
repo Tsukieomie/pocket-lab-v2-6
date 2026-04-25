@@ -278,3 +278,67 @@ address in DNS will fail. ngrok's free tier provides dual-stack DNS and works.
 **Long-term fix:** Add a domain to Cloudflare and create a DNS CNAME record
 pointing to the named tunnel — that gives a stable, permanent, dual-stack
 hostname that doesn't change between sessions.
+---
+
+## Session Log — 2026-04-25 (later): Portable Gates + Sandbox-Side Bore
+
+Run from the Perplexity Computer cloud sandbox (IPv4, ephemeral) — *not* the Vivobook.
+
+### `run_in_perplexity.sh` — full pass
+
+| Gate | Result | Time |
+|------|--------|------|
+| Gate 3 — PDF SHA-256 + tar.enc SHA-256 + v2.6 manifest policy | PASS | 48 ms |
+| Gate 2 — secp256k1 keypair, signed approval JSON, field validation | PASS | 134 ms (Path B) |
+| Total portable | PASS | 137 ms |
+
+Approval pubkey for this run: `2b6bcbd89f89f6d7d16204e06623153881f0ce18869c30bbabc080cd55593e5c`
+(ephemeral — Path B keys are not persisted from cloud sandbox).
+
+### Bore from the sandbox side
+
+- `bore` binary auto-installed by `linux/tunnel.sh install-bore` → `~/.local/bin/bore` (v0.6.0)
+- Control-port fallback worked as designed: `2222 FAIL → 8443 OK`
+- Tunnel came up at `188.93.146.98:40003` (ctrl=8443), TCP-reachable, `bore-port.txt` synced locally
+- `BORE_CTRL_PORT=8443` was persisted to `~/.bore_env` automatically
+
+### fs-bridge from the sandbox
+
+`linux/tunnel.sh up` also tries to start fs-bridge. It **failed** (expected) because:
+
+```
+[fs-bridge] ERROR: FS_BRIDGE_TOKEN not set in ~/.bore_env
+```
+
+The cloud sandbox is ephemeral and has no `FS_BRIDGE_TOKEN` in its `~/.bore_env` — and even if it did, exposing a sandbox-local fs-bridge isn't useful: the canonical fs-bridge lives on the Vivobook (see ngrok findings above).
+
+### Why we did **not** push `bore-port.txt` to GitHub
+
+Live remote `bore-port.txt` at the time of this session was the **Vivobook's cloudflared entry**:
+
+```
+port=cloudflared
+host=people-modification-metropolitan-sources.trycloudflare.com
+machine=kenny-VivoBook-ASUSLaptop-X513IA-M513IA
+updated=2026-04-25T06:21:16Z
+```
+
+Pushing the sandbox's bore endpoint (`188.93.146.98:40003`) would have overwritten the Vivobook's entry with a tunnel that:
+- dies as soon as the sandbox shuts down (ephemeral),
+- points at a sandbox SSH daemon, not at the Vivobook,
+- would mislead the next Perplexity session into SSH-ing to the wrong host.
+
+**Decision: cancelled the push.** `bore-port.txt` must only ever be updated from the host the user actually wants Perplexity to reach (currently the Vivobook).
+
+### Recommendation — add a guard
+
+`linux/tunnel.sh sync-port` (and the `perplexity-connect.sh` launcher) should refuse to push `bore-port.txt` from a host where `machine` differs from the value already on `main`, unless `--force` is passed. Prevents accidental overwrites from cloud sandboxes / borrowed laptops.
+
+### Sandbox vs. Vivobook — when to use which
+
+| Task | Run from |
+|------|----------|
+| Portable gate verification (`run_in_perplexity.sh`) | Cloud sandbox — by design |
+| Vault decrypt, Gate 1 startup integrity | iSH on-device only |
+| `bore-port.txt` updates, fs-bridge | Vivobook (the canonical reachable host) |
+| Quick file ops on the Vivobook | Vivobook fs-bridge via ngrok URL |
