@@ -110,6 +110,8 @@ echo "New token: $NEW_TOKEN"
 
 ## What Perplexity Computer should do when asked to "tunnel"
 
+### From the laptop (starting / managing)
+
 1. Confirm the laptop side is up:
    - `pgrep -af 'fs-bridge/server.js'`
    - `curl -sf http://localhost:4040/api/tunnels` (ngrok admin API)
@@ -118,15 +120,47 @@ echo "New token: $NEW_TOKEN"
 4. If ngrok is down, start it pointing at `:7779` (commands above).
 5. **Do not** start a `bore` tunnel, an `ngrok tcp 22` tunnel, or any SSH-based tunnel unless the user explicitly says "ssh tunnel" or "bore".
 
-To use the tunnel from a remote agent:
+### From a remote agent (using the tunnel)
+
+**Discovery — where to find the live URL:**
 
 ```sh
-TOKEN=<FS_BRIDGE_TOKEN>
-URL=<ngrok public url>
-curl -sS -H "Authorization: Bearer $TOKEN" "$URL/status"
-curl -sS -H "Authorization: Bearer $TOKEN" "$URL/ls?path=/home/kenny"
+# The active ngrok URL is auto-published to the repo (see ngrok-url.txt below).
+URL=$(curl -sf https://raw.githubusercontent.com/Tsukieomie/pocket-lab-v2-6/main/ngrok-url.txt \
+      | grep '^url=' | cut -d= -f2-)
+echo "$URL"
+```
+
+The token is **never** in the repo — the user provides it inline (or rotates one for the session per the procedure above).
+
+**Health check (one-liner):**
+
+```sh
+curl -sf -H "Authorization: Bearer $TOKEN" "$URL/status" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print('ok' if d.get('ok') else 'down')"
+```
+
+**Read a file:**
+```sh
 curl -sS -H "Authorization: Bearer $TOKEN" "$URL/read?path=/home/kenny/.bashrc"
 ```
+
+**List a directory:**
+```sh
+curl -sS -H "Authorization: Bearer $TOKEN" "$URL/ls?path=/home/kenny"
+```
+
+**Run a shell command (canonical use case — `/exec`):**
+```sh
+curl -sS -H "Authorization: Bearer $TOKEN" \
+     -H "ngrok-skip-browser-warning: true" \
+     -H "Content-Type: application/json" \
+     -X POST -d '{"cmd":"uname -a"}' \
+     "$URL/exec" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['stdout'])"
+```
+
+> Always send `ngrok-skip-browser-warning: true` on free-tier ngrok URLs to avoid the HTML interstitial.
 
 ---
 
@@ -143,11 +177,29 @@ curl -sS -H "Authorization: Bearer $TOKEN" "$URL/read?path=/home/kenny/.bashrc"
 
 ---
 
+## ngrok-url.txt — auto-published tunnel address
+
+Mirrors the legacy `bore-port.txt` pattern. A laptop-side watcher writes the current public ngrok URL to `ngrok-url.txt` and pushes it to the repo whenever it changes, so any agent (this one, future sessions, scheduled tasks) can find the live URL with a single `curl` to `raw.githubusercontent.com`.
+
+File format:
+```
+url=https://xxxx-xx-xx-xx-xx.ngrok-free.app
+updated=2026-04-25T07:01:17Z
+port=7779
+```
+
+Publisher script: `linux/ngrok-url-publisher.sh`
+Systemd unit: `linux/system/ngrok-url-publisher.service`
+
+---
+
 ## Related files
 
 - `linux/fs-bridge/server.js` — the HTTP service
 - `linux/fs-bridge/.env` (or `~/.bore_env`) — token + config
 - `linux/system/fs-bridge.service` — systemd unit
 - `linux/system/cloudflared-tunnel.service` — cloudflared alternative
+- `linux/ngrok-url-publisher.sh` — pushes ngrok URL to repo
+- `linux/system/ngrok-url-publisher.service` — watcher unit
 - `linux/tunnel.sh` — legacy bore tunnel control
 - `CONNECTOR.md` — Perplexity Computer connection details

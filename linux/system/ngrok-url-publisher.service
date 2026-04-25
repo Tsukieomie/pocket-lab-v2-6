@@ -1,0 +1,25 @@
+[Unit]
+Description=Pocket Lab — auto-publish ngrok URL to repo (ngrok-url.txt)
+Documentation=https://github.com/Tsukieomie/pocket-lab-v2-6/blob/main/TUNNEL.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env bash %h/pocket-lab-v2-6/linux/ngrok-url-publisher.sh
+Restart=on-failure
+RestartSec=10s
+
+# Inherit GH_TOKEN, REPO, etc. from ~/.bore_env (read by the script itself)
+Environment=HOME=%h
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/pocket-lab-v2-6
+
+[Install]
+WantedBy=default.target
