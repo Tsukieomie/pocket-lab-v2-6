@@ -325,6 +325,46 @@ The correct statement is:
 
 ---
 
+## APCB Analysis Results (Phase 3 -- 2026-04-25)
+
+See APCB_ANALYSIS.md for full detail. Summary:
+
+APCB (AMD Platform Configuration Block) is a tokenized binary embedded in SPI
+flash. AmdApcbDxeV3 reads it during DXE phase before AGESA CBS defaults run.
+
+Six APCB instances found in X513IA.308. Primary and mirror copies are at:
+
+    Primary APCB:  SPI offset 0x0029a800 (BIOS file), size 0x3a7c
+    Mirror APCB:   SPI offset 0x006e2800 (BIOS file), size 0x3a7c
+
+Token 0x0076 (CfgSMTControl) found in both copies:
+
+    Primary value byte: 0x0029e021 = 0x00 (Auto -> Disabled for 4700U)
+    Mirror value byte:  0x006e6021 = 0x00 (Auto -> Disabled)
+
+The patch: change both value bytes 0x00 -> 0x01 (Enable).
+Zero APCB header checksum at 0x0029a810 and 0x006e2810 (Renoir accepts 0 = skip).
+
+Patch tool: patch_apcb_smt.py (see repo root). Takes X513IAAS.308 as input,
+outputs X513IAAS.308.smt_patched. Use with external SPI clip to flash.
+
+No NVRAM override path exists: AmdApcbDxeV3 on X513IA does not expose a
+writable APCB EFI variable. Only SPI flash write can change APCB values.
+
+---
+
+## CbsBaseDxeRN Disassembly Results (Phase 2 -- 2026-04-25)
+
+See BIOS_LAYER1_ANALYSIS.md for full disassembly. Key result:
+
+CbsBaseDxeRN maps AmdSetup bytes 0x147-0x153 to SMU message 0x1e6 fields.
+NO SMT control byte is mapped anywhere in AmdSetup. AGESA was built without
+SMT as a user-configurable option for CPUID 0x00860601 on this BIOS.
+
+This rules out NVRAM/EFI variable write as an SMT enable path for X513IA.308.
+
+---
+
 ## Alternative Enable Paths (Priority Order)
 
 ### 1. Smokeless UMAF (Try First -- No Flash Required)
@@ -333,34 +373,82 @@ Repository: https://github.com/DavidS95/Smokeless_UMAF
 Renoir "U" APUs: explicitly listed as supported.
 
 Smokelessly UMAF is a bootable UEFI application that launches a full AMD CBS
-browser. It reads AmdSetup directly and can expose SMT options that ASUS
-removed from the OEM HII form -- if AGESA still has the code path compiled.
+browser. It can read and write APCB tokens at runtime if the AmdApcbDxeV3
+driver exposes a runtime interface. It also exposes CBS HII options that ASUS
+removed from the OEM menu.
+
+Key question: does UMAF write to APCB in SPI flash (requires SPI write), or
+write to the in-memory copy loaded by AmdApcbDxeV3 (survives only until next
+boot without SPI write)? Community reports on Renoir platforms suggest UMAF
+CBS changes via AmdSetup EFI variable -- meaning they persist across reboots
+through NVRAM, not APCB.
+
+If UMAF exposes "SMT Control" under CPU Common Options:
+    -> Set to Enable
+    -> Save and exit
+    -> Reboot and check: cat /sys/devices/system/cpu/smt/control
+
+If SMT control does NOT appear in UMAF: AGESA compiled without SMT
+configuration for CPUID 0x00860601. Writing APCB token via SPI flash is then
+the only path without coreboot.
 
 Setup:
-1. Download EFI binary from GitHub releases
-2. FAT32 USB -> /EFI/Boot/bootx64.efi
-3. Boot: F2/Del -> Boot Override -> USB
-4. Device Manager -> AMD CBS -> CPU Common Options -> Performance
+1. Download EFI binary from GitHub releases (Releases page)
+2. Format USB as FAT32
+3. Create /EFI/Boot/ on USB
+4. Copy bootx64.efi to /EFI/Boot/bootx64.efi
+5. Boot: hold F2 at ASUS splash -> Boot Override -> USB
+6. Device Manager -> AMD CBS -> CPU Common Options -> Performance
    -> CCD/Core/Thread Enablement -> SMT control -> Enable
-5. Save, reboot, verify
+7. F10 save, reboot
+8. Verify: cat /sys/devices/system/cpu/smt/control
 
-If SMT control does not appear in UMAF: AGESA was compiled without SMT
-for CPUID 0x00860601. UMAF cannot add options AGESA does not support.
+### 2. APCB SPI Flash Patch (Direct -- Requires CH341A)
 
-### 2. RU.efi or Linux Direct EFI Variable Write
+This is the confirmed working path based on APCB_ANALYSIS.md findings.
 
-If SMT byte offset in AmdSetup is known:
-- RU.efi from UEFI shell: modify AmdSetup at the byte offset
-- Linux: chattr -i the efivars file, write modified bytes, reboot
+Required hardware:
+    CH341A programmer ($5-10)
+    SOIC-8 clip (may be included with CH341A kit)
+    X513IA SPI flash chip: likely Winbond W25Q128JVSQ or ESMT F25L128
+    Location: SOIC-8 IC near PCH area on motherboard (check board photos)
 
-Offset must come from CbsBaseDxeRN disassembly or community IFR dumps.
-See BIOS_LAYER1_ANALYSIS.md for the full AmdSetup hex dump and procedure.
+Procedure:
+1. Power off, remove AC + battery
+2. Attach SOIC-8 clip to SPI flash chip
+3. Read backup: flashrom -p ch341a_spi -r original.bin
+4. Verify: sha256sum original.bin (record hash)
+5. Apply patch: python3 patch_apcb_smt.py X513IAAS.308
+6. Verify patch: python3 -c "d=open('X513IAAS.308.smt_patched','rb').read(); print(hex(d[0x0029e021]), hex(d[0x006e6021]))"  # expect 0x1 0x1
+7. Write: flashrom -p ch341a_spi -w X513IAAS.308.smt_patched
+8. Reassemble, boot
+9. Verify: cat /sys/devices/system/cpu/smt/control  # expect: on or forceoff
 
-Risk: wrong offset = NVRAM corruption (recoverable via CMOS clear).
+Risk: moderate. A bad flash = brick. External SPI clip allows recovery.
+Always keep original.bin on a separate drive before flashing.
 
-### 3. Coreboot with SMT-Enabled AGESA (Definitive)
+### 3. UEFI Shell AFU/AMI Flash Bypass
 
-The only path if AGESA was compiled without SMT for 4700U.
+AMI Flash Update (AFU) tool run from UEFI shell before SMM is locked:
+
+Some AMI Aptio V platforms allow unsigned flash writes if the tool runs before
+the SMM handler registers its write-protect callback. On ASUS consumer boards
+this window is typically closed by the time any UEFI application can run.
+
+Not recommended for X513IA -- the SMM lock is set by AGESA early in DXE,
+before UEFI applications execute. Internal flash via AFU is unlikely to work
+on this specific board generation.
+
+If attempted:
+    Tools: afuefi64.efi from ASUS BIOS package (WinFlash EXE -> extract inner EFI)
+    Command: afuefi64.efi X513IAAS.308.smt_patched /P /B /N /CLNEVNLOG
+    Boot to UEFI shell via bootx64.efi on USB, then run afuefi64
+
+### 4. Coreboot with SMT-Enabled AGESA (Definitive)
+
+The definitive path regardless of AGESA compilation flags:
+coreboot can pass its own APCB to the AGESA blob, overriding everything.
+
 Requires board init code for X513IA (not upstream) + external SPI clip.
 See BIOS_LAYER1_ANALYSIS.md for full requirements.
 
@@ -368,12 +456,11 @@ Reference: https://doc.coreboot.org/mainboard/google/zork.html
 
 ## Next Steps
 
-1. Prepare FAT32 USB with Smokeless UMAF -- attempt SMT control via CBS browser
-2. If UMAF fails: disassemble CbsBaseDxeRN (4.8KB) for AmdSetup offset table
-3. If offset found: write AmdSetup SMT byte via Linux efivars or RU.efi
-4. If all EFI variable paths fail: evaluate coreboot Zork port for X513IA
-5. coreboot path: build and test on a disposable/backup machine first --
-   reflashing with bad firmware = brick without SPI clip recovery
+1. Try Smokeless UMAF USB -- check if CBS browser shows SMT control
+2. If UMAF shows SMT control: enable, save, reboot, verify
+3. If UMAF does not show SMT control: proceed to SPI flash patch
+4. SPI flash patch: acquire CH341A + SOIC-8 clip, follow Path 2 procedure
+5. Coreboot: long-term option if SPI chip is write-protected at hardware level
 
 ---
 
