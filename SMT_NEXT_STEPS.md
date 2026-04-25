@@ -4,6 +4,8 @@
 Generated: 2026-04-25  
 Status of automation: **COMPLETE** — patched BIOS ready, scripts written
 
+> **2026-04-25 PM update:** UMAF ruled out (kernel panic on Renoir). flashrom blocked (SPI protection). fwupd capsule blocked (unsigned, OsIndications bits 2+3 = False). **Active path: `setup_var_cv` UEFI shell → write AmdSetup offset for SMT=Enable.** See [SETUP_VAR_SMT.md](SETUP_VAR_SMT.md) for full details and IFR extraction plan.
+
 ---
 
 ## Summary of What Was Done Automatically
