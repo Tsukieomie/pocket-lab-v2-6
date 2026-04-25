@@ -141,18 +141,32 @@ MODELS = {
         "fn":       "_run_ollama",
         "model_id": "gemma3:4b",
     },
-    "supermemory-mistral": {
+    "openrouter-mistral": {
         "label":    "Mistral (OpenRouter free)",
         "env":      "OPENROUTER_API_KEY",
         "color":    BLUE,
         "fn":       "_run_openrouter",
         "model_id": "mistralai/mistral-7b-instruct:free",
     },
-    "supermemory-llama": {
+    "openrouter-llama": {
         "label":    "Llama3 (OpenRouter free)",
         "env":      "OPENROUTER_API_KEY",
         "color":    BLUE,
         "fn":       "_run_openrouter",
+        "model_id": "meta-llama/llama-3.2-3b-instruct:free",
+    },
+    "supermemory-mistral": {
+        "label":    "Mistral via Supermemory→OpenRouter",
+        "env":      "SUPERMEMORY_API_KEY",
+        "color":    BLUE,
+        "fn":       "_run_supermemory",
+        "model_id": "mistralai/mistral-7b-instruct:free",
+    },
+    "supermemory-llama": {
+        "label":    "Llama3 via Supermemory→OpenRouter",
+        "env":      "SUPERMEMORY_API_KEY",
+        "color":    BLUE,
+        "fn":       "_run_supermemory",
         "model_id": "meta-llama/llama-3.2-3b-instruct:free",
     },
 }
@@ -498,6 +512,14 @@ def run_parallel(prompt: str,
         for t in threads:
             t.join(timeout=timeout + 2)
 
+    # Mark any unfinished runners as TIMEOUT so JSON consumers and the
+    # formatted printer don't silently render empty success rows.
+    for k in model_keys:
+        r = results[k]
+        if not r.done:
+            r.error = r.error or f"TIMEOUT after {timeout}s"
+            r.done  = True
+
     return [results[k] for k in model_keys]
 
 
@@ -761,11 +783,8 @@ def detect_available_models() -> list:
         env = cfg.get("env")
         fn  = cfg.get("fn", "")
         if env is None:
-            if fn == "_run_openrouter":
-                # OpenRouter free tier — always available, no key needed
-                available.append(key)
-            elif cfg["model_id"] in ollama_models:
-                # Ollama — check if the model is actually pulled
+            # Local-only providers (Ollama) — verify the model is actually pulled
+            if fn == "_run_ollama" and cfg["model_id"] in ollama_models:
                 available.append(key)
         elif os.environ.get(env):
             available.append(key)
@@ -783,6 +802,12 @@ def main():
           python3 parallel_ai.py --list-models
           python3 parallel_ai.py --json "Summarize the Akwei case"
           python3 parallel_ai.py --timeout 20 --models sonar "latest RF news"
+
+        PRIVACY NOTE:
+          Unless --no-mem0 and --no-supermemory are passed, every run sends
+          the full prompt and every model's full response to mem0.ai and
+          api.supermemory.ai for memory storage. Use --no-mem0
+          --no-supermemory for sensitive prompts.
         """)
     )
     parser.add_argument("prompt",           nargs="?",  default=None,
@@ -798,9 +823,9 @@ def main():
     parser.add_argument("--list-models",    action="store_true",
                         help="List all models and their availability")
     parser.add_argument("--no-mem0",        action="store_true",
-                        help="Skip saving run to mem0")
+                        help="Skip saving run to mem0 (PRIVACY: by default the prompt + every model response is POSTed to mem0.ai)")
     parser.add_argument("--no-supermemory",  action="store_true",
-                        help="Skip Supermemory context injection and save")
+                        help="Skip Supermemory context injection and save (PRIVACY: by default the prompt + every model response is POSTed to api.supermemory.ai)")
     parser.add_argument("--compress", "-c",  action="store_true",
                         help="Pre-compress prompt via local Dolphin3 to minimize cloud token usage")
 
