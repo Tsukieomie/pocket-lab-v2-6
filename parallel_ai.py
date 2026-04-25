@@ -104,6 +104,13 @@ MODELS = {
         "fn":       "_run_anthropic",
         "model_id": "claude-sonnet-4-5",
     },
+    "claude-cli": {
+        "label":    "Claude (CLI / OAuth)",
+        "env":      None,
+        "color":    CYAN,
+        "fn":       "_run_claude_cli",
+        "model_id": "claude-opus-4-5",
+    },
     "gpt4o": {
         "label":    "GPT-4o (OpenAI)",
         "env":      "OPENAI_API_KEY",
@@ -441,8 +448,58 @@ def _run_ollama(prompt: str, model_id: str, system: str,
     result.text, result.tokens, result.error = text, tokens, err
 
 
+def _get_claude_cli_token() -> Optional[str]:
+    """Read Claude OAuth accessToken from ~/.claude/.credentials.json (written by `claude` CLI)."""
+    import json as _json
+    creds_path = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
+    try:
+        if os.path.exists(creds_path):
+            data = _json.loads(open(creds_path).read())
+            return data.get("claudeAiOauth", {}).get("accessToken") or None
+    except Exception:
+        pass
+    return None
+
+
+def _run_claude_cli(prompt: str, model_id: str, system: str,
+                    result: ModelResult, timeout: int):
+    """Run claude CLI with OAuth token from ~/.claude/.credentials.json."""
+    import subprocess
+    token = _get_claude_cli_token()
+    if not token:
+        result.error = "~/.claude/.credentials.json not found or no OAuth token — run `claude login` on device"
+        return
+
+    cmd = ["claude", "-p", prompt, "--output-format", "json", "--max-turns", "1", "--bare"]
+    if system:
+        cmd += ["--system-prompt", system]
+
+    env = {**os.environ, "ANTHROPIC_AUTH_TOKEN": token}
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, env=env
+        )
+        raw = proc.stdout.strip()
+        if not raw:
+            result.error = proc.stderr.strip() or "claude CLI returned no output"
+            return
+        import json as _json
+        data = _json.loads(raw)
+        if data.get("is_error"):
+            result.error = data.get("result", "claude CLI error")
+            return
+        result.text = data.get("result", "").strip()
+        usage = data.get("usage", {})
+        result.tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+    except subprocess.TimeoutExpired:
+        result.error = f"claude CLI timed out after {timeout}s"
+    except Exception as e:
+        result.error = str(e)
+
+
 _RUNNERS = {
     "_run_anthropic":   _run_anthropic,
+    "_run_claude_cli":  _run_claude_cli,
     "_run_openai":      _run_openai,
     "_run_perplexity":  _run_perplexity,
     "_run_ollama":      _run_ollama,
@@ -789,8 +846,9 @@ def detect_available_models() -> list:
         env = cfg.get("env")
         fn  = cfg.get("fn", "")
         if env is None:
-            # Local-only providers (Ollama) — verify the model is actually pulled
             if fn == "_run_ollama" and cfg["model_id"] in ollama_models:
+                available.append(key)
+            elif fn == "_run_claude_cli" and _get_claude_cli_token():
                 available.append(key)
         elif os.environ.get(env):
             available.append(key)
@@ -844,8 +902,11 @@ def main():
         for key, cfg in MODELS.items():
             env   = cfg.get("env")
             local = env is None
+            fn = cfg.get("fn", "")
             if key in available:
                 status = f"{GREEN} ready{RESET}"
+            elif fn == "_run_claude_cli":
+                status = f"{RED} ~/.claude/.credentials.json not found — run `claude login`{RESET}"
             elif local:
                 status = f"{RED} Ollama not running{RESET}"
             else:
