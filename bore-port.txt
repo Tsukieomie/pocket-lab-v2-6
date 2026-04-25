@@ -1,5 +1,5 @@
-port=40063
-host=188.93.146.98
-ssh=ssh -p 40063 user@188.93.146.98
-updated=2026-04-25T14:38:24Z
-machine=e2b.local
+port=56544
+host=bore.pub
+ssh=ssh -p 56544 root@bore.pub
+updated=2026-04-25T18:09:17Z
+machine=iPhone-iSH
