@@ -190,3 +190,91 @@ ssh -o StrictHostKeyChecking=no -p $PORT kenny@188.93.146.98 \
 - Token stored in `~/.bore_env` (not committed to this repo)
 - `exec` disabled by default; enable only when needed with `FS_BRIDGE_EXEC_ALLOW=1`
 - Log: `/tmp/fs-bridge.log`
+
+---
+
+## Session Log — 2026-04-25: First Successful fs-bridge Connection
+
+**Problem:** Perplexity Computer sandbox could not reach the machine directly.
+
+### What was blocking us
+
+1. **bore ports 2222 and 8443 blocked** on the local network — bore tunnel
+   failed to connect outbound.
+2. **Cloudflare quick tunnel** (`.trycloudflare.com`) worked on the machine
+   side but resolved **IPv6-only** from Perplexity's sandbox, which has no
+   IPv6 connectivity. DNS returned `fd10:aec2:5dae::` — unreachable.
+3. **Named Cloudflare tunnel** (`8132ec84-8724-4be1-a588-9e62ea6c3562.cfargotunnel.com`)
+   same problem — resolves IPv6-only, sandbox can't connect.
+4. **localhost.run / serveo** — reverse SSH tunnels started but URL was never
+   captured before the short-lived terminal capture timed out.
+
+### What finally worked — ngrok
+
+ngrok was already installed at `~/.local/bin/ngrok`. Running it in the
+background and querying its local API returned a public HTTPS URL with proper
+IPv4+IPv6 dual-stack DNS that Perplexity's sandbox could resolve and connect to.
+
+```bash
+# Start ngrok in background exposing fs-bridge
+ngrok http 7779 --log=stdout &
+sleep 5
+
+# Get the public URL from ngrok's local API
+curl -sf http://localhost:4040/api/tunnels \
+  | python3 -c "import sys,json; t=json.load(sys.stdin)['tunnels']; print(t[0]['public_url'])"
+```
+
+URL format: `https://<hash>.ngrok-free.app`
+
+Perplexity then calls fs-bridge directly:
+
+```bash
+TOKEN="pocketlab-bridge-2026"
+HOST="https://<hash>.ngrok-free.app"
+
+# Status check
+curl -sf -H "Authorization: Bearer $TOKEN" -H "ngrok-skip-browser-warning: true" "$HOST/status"
+
+# List home directory
+curl -sf -H "Authorization: Bearer $TOKEN" -H "ngrok-skip-browser-warning: true" "$HOST/ls?path=/home/kenny"
+```
+
+> **Important:** Always add `-H "ngrok-skip-browser-warning: true"` to bypass
+> ngrok's browser interstitial page on free-tier URLs.
+
+### Setup state after this session
+
+| Component | State |
+|-----------|-------|
+| `FS_BRIDGE_TOKEN` in `~/.bore_env` | `pocketlab-bridge-2026` |
+| fs-bridge systemd service | enabled, running on port 7779 |
+| SSH public key in `~/.ssh/authorized_keys` | `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM+3/rpnm/k11njemu1GahGWqHYlWKGuJLnS5QrLM6Sr perplexity-computer` |
+| ngrok | installed at `~/.local/bin/ngrok` |
+| Named Cloudflare tunnel | configured but IPv6-only from sandbox — not usable without a domain |
+
+### Reconnect procedure for next session
+
+```bash
+# 1. Start fs-bridge
+bash ~/pocket-lab-v2-6/linux/tunnel.sh fs-bridge start
+
+# 2. Start ngrok and get URL
+ngrok http 7779 --log=stdout &
+sleep 5
+curl -sf http://localhost:4040/api/tunnels \
+  | python3 -c "import sys,json; t=json.load(sys.stdin)['tunnels']; print(t[0]['public_url'])"
+
+# 3. Paste the ngrok URL into Perplexity Computer
+# Token: pocketlab-bridge-2026
+```
+
+### Root cause — IPv6-only network
+
+The Vivobook is on an **IPv6-only network** (public IP: `2600:8805:a21c:5900:...`).
+Perplexity's sandbox is **IPv4-only**. Any tunnel that only advertises an IPv6
+address in DNS will fail. ngrok's free tier provides dual-stack DNS and works.
+
+**Long-term fix:** Add a domain to Cloudflare and create a DNS CNAME record
+pointing to the named tunnel — that gives a stable, permanent, dual-stack
+hostname that doesn't change between sessions.
